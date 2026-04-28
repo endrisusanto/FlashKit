@@ -8,15 +8,15 @@ use std::os::windows::process::CommandExt;
 fn get_resource_path(app: tauri::AppHandle, name: String) -> Result<String, String> {
     let resolver = app.path();
     let resource_dir = resolver.resource_dir().map_err(|e| e.to_string())?;
+    let exe_dir = get_exe_dir();
     
     let mut paths = vec![];
     
-    // 1. Coba folder _up_/assets (Prioritas utama untuk versi install)
-    if let Some(parent) = resource_dir.parent() {
-        paths.push(parent.join("_up_").join("assets").join(&name));
-    }
+    // 1. Cek folder _up_/assets (Lokasi instalasi NSIS)
+    paths.push(exe_dir.join("_up_").join("assets").join(&name));
     
-    // 2. Cek folder assets (Untuk versi portable/development)
+    // 2. Cek folder assets (Lokasi Portable/Standard)
+    paths.push(exe_dir.join("assets").join(&name));
     paths.push(resource_dir.join("assets").join(&name));
     
     // 3. Cek folder resource_dir langsung
@@ -28,7 +28,24 @@ fn get_resource_path(app: tauri::AppHandle, name: String) -> Result<String, Stri
         }
     }
     
-    Err(format!("Resource '{}' not found. Please check AppData structure.", name))
+    Err(format!("Resource '{}' not found. Tried: {:?}", name, exe_dir))
+}
+
+#[tauri::command]
+fn get_device_info(serial: String) -> Result<std::collections::HashMap<String, String>, String> {
+    let props = vec![
+        "ro.product.model",
+        "ro.build.PDA",
+        "ro.csc.sales_code",
+        "ro.csc.country_code",
+    ];
+    
+    let mut info = std::collections::HashMap::new();
+    for prop in props {
+        let val = run_adb(vec!["-s".to_string(), serial.clone(), "shell".to_string(), "getprop".to_string(), prop.to_string()])?;
+        info.insert(prop.to_string(), val);
+    }
+    Ok(info)
 }
 fn get_exe_dir() -> PathBuf {
     std::env::current_exe()
@@ -223,7 +240,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_devices, run_adb, get_adb_version, get_app_dir, get_serial_ports, send_at_command, get_resource_path, get_samsung_port])
+        .invoke_handler(tauri::generate_handler![get_devices, run_adb, get_adb_version, get_app_dir, get_serial_ports, send_at_command, get_resource_path, get_samsung_port, get_device_info])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

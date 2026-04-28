@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, Play, Wifi, Smartphone, Check, Zap, Terminal, ChevronDown, ChevronUp, CheckCircle } from "lucide-react";
+import { RefreshCw, Play, Wifi, Smartphone, Check, Zap, Terminal, ChevronDown, ChevronUp, CheckCircle, Settings } from "lucide-react";
 
 export default function App() {
   const [devices, setDevices] = useState<string[]>([]);
+  const [deviceDetails, setDeviceDetails] = useState<Record<string, any>>({});
   const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
@@ -26,7 +27,19 @@ export default function App() {
     try {
       const list: string[] = await invoke("get_devices");
       setDevices(list);
-      if (devices.length === 0) setSelectedDevices(list);
+      
+      const details: Record<string, any> = {};
+      for (const id of list) {
+        try {
+          const info: any = await invoke("get_device_info", { serial: id });
+          details[id] = info;
+        } catch (e) {
+          console.error(`Failed to get info for ${id}`, e);
+        }
+      }
+      setDeviceDetails(details);
+      
+      if (selectedDevices.length === 0) setSelectedDevices(list);
       appendLog(`Found ${list.length} ADB device(s)`);
     } catch (e: any) {
       appendLog(`ERROR: ${e}`);
@@ -166,7 +179,9 @@ export default function App() {
         await invoke("run_adb", { args: ["-s", dev, "uninstall", "com.example.DataSaver"] }); await delay(200);
         await invoke("run_adb", { args: ["-s", dev, "uninstall", "com.example.DataSaver.test"] }); await delay(200);
         
-        appendLog(`[${dev}] Step 6: Sending HOME key...`);
+        appendLog(`[${dev}] Step 6: Enabling WiFi & Sending HOME key...`);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global wifi_on 1"] }); await delay(200);
         await invoke("run_adb", { args: ["-s", dev, "shell", "input keyevent KEYCODE_HOME"] });
         appendLog(`[${dev}] ✓ SUCCESS`);
       } catch (e: any) {
@@ -178,16 +193,23 @@ export default function App() {
   };
 
   const setupPrecondition = async () => {
-    if (selectedDevices.length === 0) return;
+    if (selectedDevices.length === 0) {
+      const list: string[] = await invoke("get_devices");
+      if (list.length === 0) {
+        appendLog("✗ No devices selected.");
+        return;
+      }
+    }
     setLoading(true);
     setLogExpanded(true);
     appendLog("──── Setup Precondition GBA Test ────");
-    for (const dev of selectedDevices) {
+    for (const dev of selectedDevices.length > 0 ? selectedDevices : devices) {
       appendLog(`[${dev}] Applying GBA Preconditions...`);
       try {
         await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system screen_off_timeout 600000"] }); await delay(200);
         await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system time_12_24 12"] }); await delay(200);
         await invoke("run_adb", { args: ["-s", dev, "shell", "locksettings set-disabled true"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] }); await delay(200);
         appendLog(`[${dev}] ✓ GBA Settings Applied`);
       } catch (e: any) {
         appendLog(`[${dev}] ✗ ${e}`);
@@ -198,9 +220,16 @@ export default function App() {
   };
 
   const connectWifi = async () => {
-    if (selectedDevices.length === 0 || !ssid) return;
     setLoading(true);
     setLogExpanded(true);
+    
+    const activeDevices = selectedDevices.length > 0 ? selectedDevices : devices;
+    if (activeDevices.length === 0 || !ssid) {
+      appendLog("✗ No devices or SSID.");
+      setLoading(false);
+      return;
+    }
+
     appendLog(`──── WiFi Setup: ${ssid} ────`);
     
     let apk: string;
@@ -212,8 +241,11 @@ export default function App() {
       return;
     }
 
-    for (const dev of selectedDevices) {
+    for (const dev of activeDevices) {
       try {
+        appendLog(`[${dev}] Ensuring WiFi is ON...`);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] }); await delay(500);
+
         appendLog(`[${dev}] Installing WifiUtil...`);
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] }); await delay(1000);
         appendLog(`[${dev}] Configuring network...`);
@@ -245,96 +277,111 @@ export default function App() {
       <header className="flex items-center px-6 h-12 bg-[var(--win-bg-smoke)] border-b border-[var(--win-border)] shrink-0" data-tauri-drag-region>
         <div className="flex items-center gap-3">
           <Zap className="w-5 h-5 text-[var(--win-accent)]" />
-          <span className="text-[14px] font-semibold text-[var(--win-text-secondary)]">FlashKit</span>
+          <span className="text-[12px] font-bold tracking-widest uppercase opacity-80">FlashKit ⚡</span>
+        </div>
+        <div className="flex-1" />
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] px-2 py-0.5 rounded bg-[rgba(255,255,255,0.05)] text-[var(--win-text-tertiary)]">v1.1.4</span>
+          <button onClick={() => window.location.reload()} className="p-2 hover:bg-[rgba(255,255,255,0.08)] rounded-md transition-colors">
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[var(--win-accent)]' : ''}`} />
+          </button>
         </div>
       </header>
 
-      {/* ── MAIN CONTENT ── */}
-      <div className="flex-1 flex min-h-0 p-4 gap-4">
-
-        {/* ── LEFT: DEVICE LIST ── */}
-        <div className="w-[320px] win-card flex flex-col bg-[var(--win-bg-smoke)] overflow-hidden shadow-xl">
-          <div className="p-5 border-b border-[var(--win-border)]">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-[15px] font-bold">Devices</span>
-              <button onClick={refreshDevices} disabled={loading} className="win-btn-subtle !p-2 !min-h-0">
-                <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-              </button>
-            </div>
-            {devices.length > 0 && (
-              <button onClick={selectAll} className="text-[13px] text-[var(--win-accent)] hover:opacity-80 transition-opacity cursor-pointer">
-                {selectedDevices.length === devices.length ? "Deselect all" : "Select all connected"}
-              </button>
-            )}
+      {/* ── DASHBOARD CONTENT ── */}
+      <main className="flex-1 flex min-h-0 p-4 gap-4 overflow-hidden">
+        
+        {/* Left: Device List */}
+        <div className="w-96 flex flex-col gap-3 shrink-0">
+          <div className="flex items-center justify-between px-1">
+            <h3 className="text-[13px] font-semibold text-[var(--win-text-secondary)]">Devices ({devices.length})</h3>
+            <button 
+              onClick={refreshDevices}
+              className="text-[11px] text-[var(--win-accent)] hover:underline font-medium"
+            >
+              Refresh
+            </button>
           </div>
-
-          <div className="flex-1 overflow-y-auto p-2">
+          
+          <div className="flex-1 win-card overflow-y-auto p-2 bg-[rgba(255,255,255,0.02)]">
             {devices.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-[var(--win-text-disabled)] text-center px-6 py-10">
-                <Smartphone className="w-10 h-10 mb-4 opacity-20" />
-                <p className="text-[14px] font-medium">No devices found</p>
-                <p className="text-[12px] mt-2 leading-relaxed text-[var(--win-text-tertiary)]">Connect your device via USB and make sure ADB is enabled.</p>
+              <div className="h-full flex flex-col items-center justify-center opacity-30 gap-3 grayscale">
+                <Smartphone className="w-10 h-10" />
+                <span className="text-[12px]">No devices detected</span>
               </div>
             ) : (
               <div className="space-y-1">
-                {devices.map(dev => {
-                  const sel = selectedDevices.includes(dev);
-                  return (
-                    <div key={dev} onClick={() => toggleDevice(dev)} className={`win-list-item !py-3 !px-4 ${sel ? "selected" : ""}`}>
-                      <div className={`win-checkbox ${sel ? "checked" : ""}`}>
-                        {sel && <Check className="w-3 h-3 text-black" strokeWidth={3} />}
+                <button 
+                  onClick={selectAll}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-[rgba(255,255,255,0.05)] transition-colors text-left"
+                >
+                  <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selectedDevices.length === devices.length ? 'bg-[var(--win-accent)] border-[var(--win-accent)]' : 'border-[rgba(255,255,255,0.3)]'}`}>
+                    {selectedDevices.length === devices.length && <Check className="w-3 h-3 text-black font-bold" />}
+                  </div>
+                  <span className="text-[13px] font-semibold">Select All</span>
+                </button>
+                <div className="h-[1px] bg-[var(--win-border)] my-2 mx-2" />
+                {devices.map(id => (
+                  <button
+                    key={id}
+                    onClick={() => toggleDevice(id)}
+                    className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-[rgba(255,255,255,0.08)] transition-all group border border-transparent hover:border-[rgba(255,255,255,0.05)]"
+                  >
+                    <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors shrink-0 ${selectedDevices.includes(id) ? 'bg-[var(--win-accent)] border-[var(--win-accent)]' : 'border-[rgba(255,255,255,0.2)] group-hover:border-[var(--win-accent)]'}`}>
+                      {selectedDevices.includes(id) && <Check className="w-3.5 h-3.5 text-black font-bold" />}
+                    </div>
+                    <div className="flex flex-col min-w-0 flex-1 ml-2 text-left">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[13px] font-bold text-[var(--win-text-primary)] truncate">{deviceDetails[id]?.['ro.product.model'] || id}</span>
+                        <span className="text-[10px] text-[var(--win-accent)] font-bold">{id.slice(-4)}</span>
                       </div>
-                      <div className="min-w-0">
-                        <p className="text-[14px] font-medium truncate">{dev}</p>
+                      <div className="grid grid-cols-2 gap-x-2 mt-1 opacity-60">
+                        <span className="text-[10px] uppercase font-bold text-[var(--win-text-tertiary)]">PDA: {deviceDetails[id]?.['ro.build.PDA'] || 'N/A'}</span>
+                        <span className="text-[10px] uppercase font-bold text-[var(--win-text-tertiary)] text-right">CSC: {deviceDetails[id]?.['ro.csc.sales_code'] || 'N/A'} ({deviceDetails[id]?.['ro.csc.country_code'] || '??'})</span>
                       </div>
                     </div>
-                  );
-                })}
+                  </button>
+                ))}
               </div>
             )}
           </div>
-
-          <div className="p-4 bg-[rgba(0,0,0,0.1)] border-t border-[var(--win-border)]">
-            <div className="flex items-center gap-3">
-              <div className={`w-2.5 h-2.5 rounded-full ${devices.length > 0 ? "bg-[var(--win-success)] shadow-[0_0_8px_rgba(108,203,95,0.4)]" : "bg-[var(--win-text-disabled)]"}`}></div>
-              <span className="text-[12px] text-[var(--win-text-tertiary)] font-medium">
-                {selectedDevices.length} of {devices.length} devices selected
-              </span>
-            </div>
-          </div>
         </div>
 
-        {/* ── RIGHT: CONFIG & ACTIONS ── */}
+        {/* Right: Main Config & Actions */}
         <div className="flex-1 flex flex-col gap-4 min-w-0">
-
-          {/* ── CONFIG CARD ── */}
-          <div className="win-card p-6 bg-[var(--win-bg-smoke)] shadow-lg">
-            <h3 className="text-[14px] font-bold mb-5 flex items-center gap-2">
-              <Wifi className="w-4 h-4 text-[var(--win-accent)]" />
-              WiFi Configuration
-            </h3>
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="block text-[12px] font-medium text-[var(--win-text-tertiary)] uppercase tracking-wider">Network SSID</label>
-                <input
-                  type="text"
-                  value={ssid}
-                  onChange={e => setSsid(e.target.value)}
-                  className="win-input !py-2.5"
-                  placeholder="e.g. MyWiFiNetwork"
-                />
+          
+          <div className="flex gap-4 shrink-0 overflow-x-auto pb-1">
+            {/* WiFi Config */}
+            <div className="win-card p-5 flex-1 min-w-[300px]">
+              <div className="flex items-center gap-2 mb-4">
+                <Wifi className="w-4 h-4 text-[var(--win-accent)]" />
+                <h3 className="text-[13px] font-bold uppercase tracking-tight">WiFi Configuration</h3>
               </div>
-              <div className="space-y-2">
-                <label className="block text-[12px] font-medium text-[var(--win-text-tertiary)] uppercase tracking-wider">Password</label>
-                <input
-                  type="text"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  className="win-input !py-2.5"
-                  placeholder="Password (leave blank for open)"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-[var(--win-text-tertiary)] uppercase tracking-wider">SSID</label>
+                  <input 
+                    value={ssid}
+                    onChange={e => setSsid(e.target.value)}
+                    className="win-input"
+                    placeholder="WIFI Name"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-[var(--win-text-tertiary)] uppercase tracking-wider">Password</label>
+                  <input 
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    className="win-input"
+                    placeholder="••••••••"
+                  />
+                </div>
               </div>
             </div>
+          </div>
+
+          <div className="flex-1 win-card bg-[rgba(0,0,0,0.2)] border-[var(--win-border)] p-6 overflow-y-auto">
             {/* Actions */}
             <section>
               <h3 className="text-[13px] font-semibold mb-3 text-[var(--win-text-secondary)]">Actions</h3>
@@ -384,12 +431,12 @@ export default function App() {
             </section>
 
             {/* ADB Exploit via COM */}
-            <section className="mt-6">
+            <section className="mt-8">
               <h3 className="text-[13px] font-semibold mb-3 text-[var(--win-text-secondary)]">ADB Exploit (Virtual COM)</h3>
               <div className="win-card p-5 bg-[rgba(255,165,0,0.05)] border-[rgba(255,165,0,0.2)]">
                 <div className="flex items-end gap-4">
                   <div className="flex-1">
-                    <label className="block text-[12px] text-[var(--win-text-tertiary)] mb-2 uppercase tracking-tight font-bold">Select COM Port</label>
+                    <label className="block text-[12px] text-[var(--win-text-tertiary)] mb-2 uppercase tracking-tight font-bold">Modem Port</label>
                     <select
                       value={selectedPort}
                       onChange={e => setSelectedPort(e.target.value)}
@@ -408,11 +455,11 @@ export default function App() {
                     className="win-btn-accent !bg-[var(--win-warning)] !text-black hover:!opacity-90 flex items-center gap-2 h-[38px] px-6"
                   >
                     <Zap className="w-4 h-4" />
-                    Force Enable ADB
+                    Force AT Exploit
                   </button>
                 </div>
                 <p className="text-[11px] text-[var(--win-text-disabled)] mt-3">
-                  Use this if 'adb devices' is empty. Requires Samsung Mobile USB Modem port.
+                  Automatic Samsung Modem detection is enabled.
                 </p>
               </div>
             </section>
@@ -447,18 +494,23 @@ export default function App() {
             </div>
           </div>
         </div>
-      </div>
+      </main>
 
       {/* ── STATUS BAR ── */}
-      <footer className="flex items-center justify-between px-6 h-[28px] bg-[var(--win-accent-bg)] text-[11px] text-white font-semibold shrink-0 shadow-[0_-4px_10px_rgba(0,0,0,0.2)]">
+      <footer className="h-8 bg-[var(--win-bg-smoke)] border-t border-[var(--win-border)] flex items-center px-4 justify-between shrink-0">
         <div className="flex items-center gap-4">
-          <span className="uppercase tracking-widest">FlashKit v1.0.0</span>
-          <span className="opacity-60">|</span>
-          <span>Build: Stable</span>
+          <div className="flex items-center gap-1.5">
+            <div className={`w-2 h-2 rounded-full ${devices.length > 0 ? 'bg-[var(--win-success)] shadow-[0_0_8px_rgba(39,174,96,0.5)]' : 'bg-[var(--win-text-disabled)]'}`} />
+            <span className="text-[10px] font-semibold text-[var(--win-text-secondary)] uppercase">{devices.length > 0 ? `${devices.length} Device(s) Ready` : 'No Device Connected'}</span>
+          </div>
+          <div className="h-3 w-[1px] bg-[var(--win-border)]" />
+          <div className="flex items-center gap-1.5 text-[var(--win-text-tertiary)]">
+            <Settings className="w-3 h-3" />
+            <span className="text-[10px] font-semibold uppercase">ADB: Stable</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Smartphone className="w-3 h-3" />
-          <span>{devices.length > 0 ? `${devices.length} Device(s) Ready` : "No Connection"}</span>
+        <div className="text-[10px] font-bold text-[var(--win-accent)] uppercase tracking-tighter">
+          FlashKit Professional Provisioning
         </div>
       </footer>
     </div>
