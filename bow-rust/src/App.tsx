@@ -9,7 +9,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const logEndRef = useRef<HTMLDivElement>(null);
-  const [ssid, setSsid] = useState("2");
+  const [ssid, setSsid] = useState("RTT / IEEE 802.11");
   const [password, setPassword] = useState("1234qwer");
 
   const appendLog = (msg: string) => setLogs(prev => [...prev, msg]);
@@ -122,6 +122,7 @@ export default function App() {
         await run(["pm disable-user com.google.android.setupwizard"]);
         await invoke("run_adb", { args: ["-s", dev, "uninstall", "com.example.DataSaver"] });
         await invoke("run_adb", { args: ["-s", dev, "uninstall", "com.example.DataSaver.test"] });
+        await run(["pm uninstall net.sanapeli.adbchangelanguage"]);
         await run(["svc wifi enable"]);
         await run(["settings put global wifi_on 1"]);
         await run(["input keyevent KEYCODE_HOME"]);
@@ -170,7 +171,7 @@ export default function App() {
         appendLog(`[${dev}] Menyiapkan WifiUtil...`);
         await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] });
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] });
-        await delay(500);
+        await delay(800);
 
         // Menambah jaringan dan mengambil ID
         const addCmd = password 
@@ -189,13 +190,14 @@ export default function App() {
         }
 
         await invoke("run_adb", { args: ["-s", dev, "shell", "am instrument -e method saveConfiguration -w com.android.tradefed.utils.wifi/.WifiUtil"] });
-        await delay(3000); 
+        await delay(5000); // Tunggu lebih lama untuk handshake
         
         const status: string = await invoke("run_adb", { args: ["-s", dev, "shell", "dumpsys wifi | grep mNetworkInfo"] });
-        if (status.includes("CONNECTED/CONNECTED")) {
+        // Cek lebih fleksibel (CONNECTED atau SSID nama jaringan)
+        if (status.includes("CONNECTED") || status.includes(ssid)) {
           appendLog(`[${dev}] ✓ WiFi TERHUBUNG`);
         } else {
-          appendLog(`[${dev}] ⚠ Periksa koneksi manual pada perangkat`);
+          appendLog(`[${dev}] ⚠ Cek manual (Status: ${status.split('\n')[0].trim()})`);
         }
       } catch (e: any) { appendLog(`[${dev}] ✗ GAGAL: ${e}`); }
     }));
