@@ -163,9 +163,11 @@ export default function App() {
         };
 
         await run(["settings put global system_locales en-US"]);
+        await run(["settings put system system_locales en-US"]);
         await run(["settings put global stay_on_while_plugged_in 7"]);
         await run(["settings put global device_provisioned 1"]);
         await run(["settings put secure user_setup_complete 1"]);
+        await run(["settings put global verifier_verify_adb_installs 0"]); // Disable verify apps over USB
         await run(["settings put system samsung_eula_agree 1"]);
         await run(["settings put system screen_off_timeout 600000"]);
         await run(["settings put system time_12_24 12"]);
@@ -218,6 +220,7 @@ export default function App() {
 
         await run(["settings put global development_settings_enabled 1"]);
         await run(["settings put global adb_enabled 1"]);
+        await run(["settings put global verifier_verify_adb_installs 0"]); // Disable verify apps over USB
         
         // USB MTP Retry Logic
         let usbSuccess = false;
@@ -305,7 +308,7 @@ export default function App() {
         </div>
         <div className="flex-1" />
         <div className="flex items-center gap-2">
-          <span className="text-[11px] px-2 py-0.5 rounded bg-[rgba(255,255,255,0.05)] text-[var(--win-text-tertiary)]">v1.1.4</span>
+          <span className="text-[11px] px-2 py-0.5 rounded bg-[rgba(255,255,255,0.05)] text-[var(--win-text-tertiary)]">v1.2.2</span>
           <button onClick={() => refreshDevices()} className="p-2 hover:bg-[rgba(255,255,255,0.08)] rounded-md transition-colors">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[var(--win-accent)]' : ''}`} />
           </button>
@@ -318,53 +321,60 @@ export default function App() {
         {/* Left: Device List */}
         <div className="w-96 flex flex-col gap-3 shrink-0">
           <div className="flex items-center justify-between px-1">
-            <h3 className="text-[13px] font-semibold text-[var(--win-text-secondary)]">Devices ({devices.length})</h3>
+            <h3 className="text-[13px] font-semibold text-[var(--win-text-secondary)] uppercase tracking-tighter">Device Management ({devices.length})</h3>
             <button 
               onClick={refreshDevices}
-              className="text-[11px] text-[var(--win-accent)] hover:underline font-medium"
+              className="text-[11px] text-[var(--win-accent)] hover:underline font-medium uppercase"
             >
-              Refresh
+              Scan
             </button>
           </div>
           
-          <div className="flex-1 win-card overflow-y-auto p-2 bg-[rgba(255,255,255,0.02)]">
+          <div className="flex-1 overflow-y-auto pr-1 space-y-3 custom-scrollbar">
             {devices.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center opacity-30 gap-3 grayscale">
+              <div className="h-full flex flex-col items-center justify-center opacity-30 gap-3 grayscale win-card">
                 <Smartphone className="w-10 h-10" />
-                <span className="text-[12px]">No devices detected</span>
+                <span className="text-[12px] font-bold uppercase">No Devices Ready</span>
               </div>
             ) : (
-              <div className="space-y-1">
+              <div className="space-y-2">
                 <button 
                   onClick={selectAll}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-[rgba(255,255,255,0.05)] transition-colors text-left"
+                  className="w-full flex items-center justify-between px-4 py-2 rounded-lg bg-[rgba(255,255,255,0.03)] border border-[var(--win-border)] hover:bg-[rgba(255,255,255,0.06)] transition-all"
                 >
-                  <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${selectedDevices.length === devices.length ? 'bg-[var(--win-accent)] border-[var(--win-accent)]' : 'border-[rgba(255,255,255,0.3)]'}`}>
-                    {selectedDevices.length === devices.length && <Check className="w-3 h-3 text-black font-bold" />}
+                  <span className="text-[11px] font-bold text-[var(--win-text-tertiary)] uppercase">Select All Available</span>
+                  <div className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors ${selectedDevices.length === devices.length ? 'bg-[var(--win-accent)] border-[var(--win-accent)]' : 'border-[rgba(255,255,255,0.3)]'}`}>
+                    {selectedDevices.length === devices.length && <Check className="w-3 h-3 text-black font-extrabold" />}
                   </div>
-                  <span className="text-[13px] font-semibold">Select All</span>
                 </button>
-                <div className="h-[1px] bg-[var(--win-border)] my-2 mx-2" />
+                
                 {devices.map(id => (
-                  <button
+                  <div
                     key={id}
                     onClick={() => toggleDevice(id)}
-                    className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-[rgba(255,255,255,0.08)] transition-all group border border-transparent hover:border-[rgba(255,255,255,0.05)]"
+                    className={`relative w-full flex items-center gap-4 px-4 py-4 rounded-xl border transition-all cursor-pointer group ${selectedDevices.includes(id) ? 'bg-[rgba(0,120,212,0.12)] border-[var(--win-accent)] shadow-[0_4px_12px_rgba(0,0,0,0.2)]' : 'bg-[rgba(255,255,255,0.02)] border-[var(--win-border)] hover:border-[rgba(255,255,255,0.2)]'}`}
                   >
-                    <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors shrink-0 ${selectedDevices.includes(id) ? 'bg-[var(--win-accent)] border-[var(--win-accent)]' : 'border-[rgba(255,255,255,0.2)] group-hover:border-[var(--win-accent)]'}`}>
-                      {selectedDevices.includes(id) && <Check className="w-3.5 h-3.5 text-black font-bold" />}
+                    <div className={`w-6 h-6 rounded-md border flex items-center justify-center transition-all shrink-0 ${selectedDevices.includes(id) ? 'bg-[var(--win-accent)] border-[var(--win-accent)] scale-110' : 'border-[rgba(255,255,255,0.2)] group-hover:border-[var(--win-accent)]'}`}>
+                      {selectedDevices.includes(id) && <Check className="w-4 h-4 text-black font-black" />}
                     </div>
-                    <div className="flex flex-col min-w-0 flex-1 ml-2 text-left">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[13px] font-bold text-[var(--win-text-primary)] truncate">{deviceDetails[id]?.['ro.product.model'] || id}</span>
-                        <span className="text-[10px] text-[var(--win-accent)] font-bold">{id.slice(-4)}</span>
+                    
+                    <div className="flex flex-col min-w-0 flex-1">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[14px] font-bold text-[var(--win-text-primary)] truncate tracking-tight">{deviceDetails[id]?.['ro.product.model'] || id}</span>
+                        <span className="text-[10px] text-[var(--win-accent)] font-black opacity-80">#{id.slice(-4)}</span>
                       </div>
-                      <div className="grid grid-cols-2 gap-x-2 mt-1 opacity-60">
-                        <span className="text-[10px] uppercase font-bold text-[var(--win-text-tertiary)]">PDA: {deviceDetails[id]?.['ro.build.PDA'] || 'N/A'}</span>
-                        <span className="text-[10px] uppercase font-bold text-[var(--win-text-tertiary)] text-right">CSC: {deviceDetails[id]?.['ro.csc.sales_code'] || 'N/A'} ({deviceDetails[id]?.['ro.csc.country_code'] || '??'})</span>
+                      <div className="grid grid-cols-1 gap-1 opacity-70">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[9px] font-black bg-[rgba(255,255,255,0.05)] px-1.5 py-0.5 rounded text-[var(--win-text-tertiary)]">PDA</span>
+                          <span className="text-[10px] font-semibold truncate">{deviceDetails[id]?.['ro.build.PDA'] || 'N/A'}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[9px] font-black bg-[rgba(255,255,255,0.05)] px-1.5 py-0.5 rounded text-[var(--win-text-tertiary)]">CSC</span>
+                          <span className="text-[10px] font-semibold truncate">{deviceDetails[id]?.['ro.csc.sales_code'] || 'N/A'} ({deviceDetails[id]?.['ro.csc.country_code'] || '??'})</span>
+                        </div>
                       </div>
                     </div>
-                  </button>
+                  </div>
                 ))}
               </div>
             )}
