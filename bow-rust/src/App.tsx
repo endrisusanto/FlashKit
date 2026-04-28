@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, Play, Wifi, Smartphone, Check, Zap, Terminal, ChevronDown, ChevronUp, CheckCircle, Settings } from "lucide-react";
+import { RefreshCw, Play, Wifi, Smartphone, Check, Zap, Terminal, CheckCircle, Settings } from "lucide-react";
 
 export default function App() {
   const [devices, setDevices] = useState<string[]>([]);
@@ -11,8 +11,6 @@ export default function App() {
   const logEndRef = useRef<HTMLDivElement>(null);
   const [ssid, setSsid] = useState("2");
   const [password, setPassword] = useState("1234qwer");
-  const [logExpanded, setLogExpanded] = useState(true);
-  const [selectedPort, setSelectedPort] = useState("");
 
   const appendLog = (msg: string) => setLogs(prev => [...prev, msg]);
 
@@ -25,15 +23,14 @@ export default function App() {
     appendLog("Scanning COM ports & Modems...");
     
     try {
-      const ports: string[] = await invoke("get_serial_ports");
-      const autoPort: string | null = await invoke("get_samsung_port");
-      if (autoPort) {
-        setSelectedPort(autoPort);
-        appendLog(`[Auto] Samsung Modem detected on ${autoPort}. Waking up ADB...`);
-        await sendAT(true); 
+      const samsungPorts: string[] = await invoke("get_samsung_ports");
+      if (samsungPorts.length > 0) {
+        appendLog(`[Auto] Detected ${samsungPorts.length} Samsung Modem(s). Waking up ADB...`);
+        // Parallel AT Exploit to all ports
+        await Promise.all(samsungPorts.map(async (port) => {
+          await sendAT(true, port);
+        }));
         await delay(2000);
-      } else if (ports.length > 0 && !selectedPort) {
-        setSelectedPort(ports[0]);
       }
     } catch (e) {
       console.error("Modem scan failed", e);
@@ -64,11 +61,11 @@ export default function App() {
     setLoading(false);
   };
 
-  const sendAT = async (silent = false) => {
-    let portToUse = selectedPort;
+  const sendAT = async (silent = false, portOverride?: string) => {
+    let portToUse = portOverride;
     if (!portToUse) {
-      const auto: string | null = await invoke("get_samsung_port");
-      if (auto) portToUse = auto;
+      const auto: string[] = await invoke("get_samsung_ports");
+      if (auto.length > 0) portToUse = auto[0];
     }
 
     if (!portToUse) {
@@ -123,11 +120,15 @@ export default function App() {
 
   const skipWz = async () => {
     setLoading(true);
-    setLogExpanded(true);
 
-    appendLog("Phase 1: Initializing Force AT Exploit (Parallel)...");
-    await sendAT(false); // AT command is usually shared if same modem port, but here we wake it up
-    await delay(2000);
+    appendLog("Phase 1: Initializing Force AT Exploit (Multi-Modem)...");
+    try {
+      const samsungPorts: string[] = await invoke("get_samsung_ports");
+      if (samsungPorts.length > 0) {
+        await Promise.all(samsungPorts.map(p => sendAT(false, p)));
+        await delay(2000);
+      }
+    } catch (e) {}
 
     const list: string[] = await invoke("get_devices");
     setDevices(list);
@@ -196,7 +197,6 @@ export default function App() {
       return;
     }
     setLoading(true);
-    setLogExpanded(true);
     appendLog("──── Setup Precondition (Parallel) ────");
     
     await Promise.all(activeDevices.map(async (dev) => {
@@ -220,7 +220,6 @@ export default function App() {
 
   const connectWifi = async () => {
     setLoading(true);
-    setLogExpanded(true);
     
     const activeDevices = selectedDevices.length > 0 ? selectedDevices : devices;
     if (activeDevices.length === 0 || !ssid) {
@@ -278,7 +277,7 @@ export default function App() {
         <div className="flex-1" />
         <div className="flex items-center gap-2">
           <span className="text-[11px] px-2 py-0.5 rounded bg-[rgba(255,255,255,0.05)] text-[var(--win-text-tertiary)]">v1.1.4</span>
-          <button onClick={() => window.location.reload()} className="p-2 hover:bg-[rgba(255,255,255,0.08)] rounded-md transition-colors">
+          <button onClick={() => refreshDevices()} className="p-2 hover:bg-[rgba(255,255,255,0.08)] rounded-md transition-colors">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[var(--win-accent)]' : ''}`} />
           </button>
         </div>
@@ -377,7 +376,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex-1 win-card bg-[rgba(0,0,0,0.2)] border-[var(--win-border)] p-6 overflow-y-auto">
+          <div className="win-card bg-[rgba(0,0,0,0.2)] border-[var(--win-border)] p-6">
             {/* Actions */}
             <section>
               <h3 className="text-[13px] font-semibold mb-3 text-[var(--win-text-secondary)]">Actions</h3>
@@ -428,17 +427,19 @@ export default function App() {
           </div>
 
           {/* ── LOG PANEL ── */}
-          <div className={`win-card flex flex-col bg-black border-[var(--win-border)] transition-all duration-300 ${logExpanded ? 'h-64' : 'h-10'}`}>
-            <button 
-              onClick={() => setLogExpanded(!logExpanded)}
-              className="flex items-center justify-between px-4 h-10 border-b border-[var(--win-border)] hover:bg-[rgba(255,255,255,0.03)] shrink-0"
-            >
+          <div className={`win-card flex flex-col bg-black border-[var(--win-border)] transition-all duration-300 flex-1 min-h-0`}>
+            <div className="flex items-center justify-between px-4 h-10 border-b border-[var(--win-border)] shrink-0">
               <div className="flex items-center gap-2">
                 <Terminal className="w-3.5 h-3.5 text-[var(--win-accent)]" />
                 <span className="text-[11px] font-bold uppercase tracking-widest">System Log</span>
               </div>
-              {logExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-            </button>
+              <button 
+                onClick={() => setLogs([])}
+                className="text-[10px] text-[var(--win-text-disabled)] hover:text-white uppercase font-bold"
+              >
+                Clear
+              </button>
+            </div>
             <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] leading-relaxed select-text cursor-text">
               {logs.length === 0 ? (
                 <span className="opacity-30">Waiting for commands...</span>

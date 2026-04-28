@@ -178,19 +178,17 @@ fn run_adb(args: Vec<String>) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn get_samsung_port() -> Option<String> {
-    if let Ok(ports) = serialport::available_ports() {
-        for p in ports {
-            if let serialport::SerialPortType::UsbPort(info) = &p.port_type {
-                let manufacturer = info.manufacturer.as_deref().unwrap_or("").to_lowercase();
-                let product = info.product.as_deref().unwrap_or("").to_lowercase();
-                if manufacturer.contains("samsung") || product.contains("samsung") || product.contains("modem") {
-                    return Some(p.port_name);
-                }
+fn get_samsung_ports() -> Result<Vec<String>, String> {
+    let ports = serialport::available_ports().map_err(|e| e.to_string())?;
+    let mut samsung_ports = vec![];
+    for p in ports {
+        if let serialport::SerialPortType::UsbPort(info) = p.port_type {
+            if info.vid == 0x04e8 { // Samsung VID
+                samsung_ports.push(p.port_name);
             }
         }
     }
-    None
+    Ok(samsung_ports)
 }
 
 #[tauri::command]
@@ -240,7 +238,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_devices, run_adb, get_adb_version, get_app_dir, get_serial_ports, send_at_command, get_resource_path, get_samsung_port, get_device_info])
+        .invoke_handler(tauri::generate_handler![get_devices, run_adb, get_adb_version, get_app_dir, get_serial_ports, send_at_command, get_resource_path, get_samsung_ports, get_device_info])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
