@@ -23,6 +23,26 @@ export default function App() {
 
   const refreshDevices = async () => {
     setLoading(true);
+    appendLog("Scanning COM ports & Modems...");
+    
+    // 1. Detect and Force AT Exploit Silently first
+    try {
+      const ports: string[] = await invoke("get_serial_ports");
+      setSerialPorts(ports);
+      const autoPort: string | null = await invoke("get_samsung_port");
+      if (autoPort) {
+        setSelectedPort(autoPort);
+        appendLog(`[Auto] Samsung Modem detected on ${autoPort}. Waking up ADB...`);
+        // Kirim AT Exploit tanpa log berlebihan
+        await sendAT(true); 
+        await delay(2000); // Tunggu ADB bangun
+      } else {
+        if (ports.length > 0 && !selectedPort) setSelectedPort(ports[0]);
+      }
+    } catch (e) {
+      console.error("Modem scan failed", e);
+    }
+
     appendLog("Scanning ADB devices...");
     try {
       const list: string[] = await invoke("get_devices");
@@ -41,22 +61,6 @@ export default function App() {
       
       if (selectedDevices.length === 0) setSelectedDevices(list);
       appendLog(`Found ${list.length} ADB device(s)`);
-    } catch (e: any) {
-      appendLog(`ERROR: ${e}`);
-    }
-
-    appendLog("Scanning COM ports...");
-    try {
-      const ports: string[] = await invoke("get_serial_ports");
-      setSerialPorts(ports);
-      const autoPort: string | null = await invoke("get_samsung_port");
-      if (autoPort) {
-        setSelectedPort(autoPort);
-        appendLog(`Auto-detected Samsung Modem: ${autoPort}`);
-      } else if (ports.length > 0 && !selectedPort) {
-        setSelectedPort(ports[0]);
-      }
-      appendLog(`Found ${ports.length} COM port(s)`);
     } catch (e: any) {
       appendLog(`ERROR: ${e}`);
     }
