@@ -25,7 +25,6 @@ export default function App() {
     setLoading(true);
     appendLog("Scanning COM ports & Modems...");
     
-    // 1. Detect and Force AT Exploit Silently first
     try {
       const ports: string[] = await invoke("get_serial_ports");
       setSerialPorts(ports);
@@ -33,11 +32,10 @@ export default function App() {
       if (autoPort) {
         setSelectedPort(autoPort);
         appendLog(`[Auto] Samsung Modem detected on ${autoPort}. Waking up ADB...`);
-        // Kirim AT Exploit tanpa log berlebihan
         await sendAT(true); 
-        await delay(2000); // Tunggu ADB bangun
-      } else {
-        if (ports.length > 0 && !selectedPort) setSelectedPort(ports[0]);
+        await delay(2000);
+      } else if (ports.length > 0 && !selectedPort) {
+        setSelectedPort(ports[0]);
       }
     } catch (e) {
       console.error("Modem scan failed", e);
@@ -48,15 +46,16 @@ export default function App() {
       const list: string[] = await invoke("get_devices");
       setDevices(list);
       
+      // PARALLEL FETCHING
       const details: Record<string, any> = {};
-      for (const id of list) {
+      await Promise.all(list.map(async (id) => {
         try {
           const info: any = await invoke("get_device_info", { serial: id });
           details[id] = info;
         } catch (e) {
           console.error(`Failed to get info for ${id}`, e);
         }
-      }
+      }));
       setDeviceDetails(details);
       
       if (selectedDevices.length === 0) setSelectedDevices(list);
@@ -128,22 +127,21 @@ export default function App() {
     setLoading(true);
     setLogExpanded(true);
 
-    // Default Force AT Command
-    appendLog("Phase 1: Initializing Force AT Exploit...");
-    await sendAT(false);
-    await delay(2000); // Wait for ADB to wake up
+    appendLog("Phase 1: Initializing Force AT Exploit (Parallel)...");
+    await sendAT(false); // AT command is usually shared if same modem port, but here we wake it up
+    await delay(2000);
 
     const list: string[] = await invoke("get_devices");
     setDevices(list);
     const activeDevices = list.length > 0 ? list : selectedDevices;
 
     if (activeDevices.length === 0) {
-      appendLog("✗ No devices found even after AT Exploit. Please check connection.");
+      appendLog("✗ No devices found. Check connection.");
       setLoading(false);
       return;
     }
 
-    appendLog("Phase 2: FULL WZ SKIP (BOW ALGORITHM)");
+    appendLog("Phase 2: FULL WZ SKIP (PARALLEL)");
     
     let apkData: string;
     let apkDataTest: string;
@@ -151,74 +149,73 @@ export default function App() {
       apkData = await invoke("get_resource_path", { name: "Data_Saver_Test-debug.apk" });
       apkDataTest = await invoke("get_resource_path", { name: "Data_Saver_Test-debug-androidTest.apk" });
     } catch (e) {
-      appendLog(`ERROR: Resources not found. ${e}`);
+      appendLog(`ERROR: Resources missing. ${e}`);
       setLoading(false);
       return;
     }
 
-    for (const dev of activeDevices) {
-      appendLog(`[${dev}] Step 1: Global & System Settings...`);
+    // PARALLEL EXECUTION
+    await Promise.all(activeDevices.map(async (dev) => {
+      appendLog(`[${dev}] Starting process...`);
       try {
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global stay_on_while_plugged_in 7"] }); await delay(200);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global device_provisioned 1"] }); await delay(200);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put secure user_setup_complete 1"] }); await delay(200);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system samsung_eula_agree 1"] }); await delay(200);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system screen_off_timeout 600000"] }); await delay(200);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system time_12_24 12"] }); await delay(200);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "locksettings set-disabled true"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global system_locales en-US"] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global stay_on_while_plugged_in 7"] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global device_provisioned 1"] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put secure user_setup_complete 1"] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system samsung_eula_agree 1"] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system screen_off_timeout 600000"] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system time_12_24 12"] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", "locksettings set-disabled true"] });
         
-        appendLog(`[${dev}] Step 2: Deploying DataSaver exploit...`);
-        await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apkData] }); await delay(500);
-        await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apkDataTest] }); await delay(500);
+        await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apkData] });
+        await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apkDataTest] });
         
-        appendLog(`[${dev}] Step 3: Triggering exploit...`);
         await invoke("run_adb", { args: ["-s", dev, "shell", "am instrument -w -m -e debug false -e class 'com.example.DataSaver.ExampleInstrumentedTest' com.example.DataSaver.test/androidx.test.runner.AndroidJUnitRunner"] });
-        await delay(1000);
         
-        appendLog(`[${dev}] Step 4: Disabling Setup Wizards...`);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "pm disable-user com.sec.android.app.SecSetupWizard"] }); await delay(200);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "pm disable-user com.google.android.setupwizard"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "pm disable-user com.sec.android.app.SecSetupWizard"] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", "pm disable-user com.google.android.setupwizard"] });
         
-        appendLog(`[${dev}] Step 5: Cleaning up...`);
-        await invoke("run_adb", { args: ["-s", dev, "uninstall", "com.example.DataSaver"] }); await delay(200);
-        await invoke("run_adb", { args: ["-s", dev, "uninstall", "com.example.DataSaver.test"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "uninstall", "com.example.DataSaver"] });
+        await invoke("run_adb", { args: ["-s", dev, "uninstall", "com.example.DataSaver.test"] });
         
-        appendLog(`[${dev}] Step 6: Enabling WiFi & Sending HOME key...`);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] }); await delay(200);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global wifi_on 1"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global wifi_on 1"] });
         await invoke("run_adb", { args: ["-s", dev, "shell", "input keyevent KEYCODE_HOME"] });
         appendLog(`[${dev}] ✓ SUCCESS`);
       } catch (e: any) {
         appendLog(`[${dev}] ✗ FAILED: ${e}`);
       }
-    }
-    appendLog("──── Complete ────");
+    }));
+
+    appendLog("──── Parallel Processing Complete ────");
     setLoading(false);
   };
 
   const setupPrecondition = async () => {
-    if (selectedDevices.length === 0) {
-      const list: string[] = await invoke("get_devices");
-      if (list.length === 0) {
-        appendLog("✗ No devices selected.");
-        return;
-      }
+    const activeDevices = selectedDevices.length > 0 ? selectedDevices : devices;
+    if (activeDevices.length === 0) {
+      appendLog("✗ No devices selected.");
+      return;
     }
     setLoading(true);
     setLogExpanded(true);
-    appendLog("──── Setup Precondition GBA Test ────");
-    for (const dev of selectedDevices.length > 0 ? selectedDevices : devices) {
-      appendLog(`[${dev}] Applying GBA Preconditions...`);
+    appendLog("──── Setup Precondition (Parallel) ────");
+    
+    await Promise.all(activeDevices.map(async (dev) => {
       try {
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system screen_off_timeout 600000"] }); await delay(200);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system time_12_24 12"] }); await delay(200);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "locksettings set-disabled true"] }); await delay(200);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] }); await delay(200);
-        appendLog(`[${dev}] ✓ GBA Settings Applied`);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global development_settings_enabled 1"] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global adb_enabled 1"] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", "svc usb setFunctions mtp"] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system screen_off_timeout 600000"] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system time_12_24 12"] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", "locksettings set-disabled true"] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] });
+        appendLog(`[${dev}] ✓ GBA & Dev Settings Applied`);
       } catch (e: any) {
         appendLog(`[${dev}] ✗ ${e}`);
       }
-    }
+    }));
+    
     appendLog("──── Complete ────");
     setLoading(false);
   };
@@ -234,41 +231,38 @@ export default function App() {
       return;
     }
 
-    appendLog(`──── WiFi Setup: ${ssid} ────`);
+    appendLog(`──── WiFi Setup (Parallel): ${ssid} ────`);
     
     let apk: string;
     try {
       apk = await invoke("get_resource_path", { name: "WifiUtil.apk" });
     } catch (e) {
-      appendLog(`ERROR: WifiUtil.apk not found. ${e}`);
+      appendLog(`ERROR: WifiUtil.apk missing. ${e}`);
       setLoading(false);
       return;
     }
 
-    for (const dev of activeDevices) {
+    await Promise.all(activeDevices.map(async (dev) => {
       try {
-        appendLog(`[${dev}] Ensuring WiFi is ON...`);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] }); await delay(500);
-
-        appendLog(`[${dev}] Installing WifiUtil...`);
-        await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] }); await delay(1000);
-        appendLog(`[${dev}] Configuring network...`);
+        appendLog(`[${dev}] Enabling WiFi...`);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] });
+        await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] });
+        
         const method = password
           ? `am instrument -e method addWpaPskNetwork -e ssid "${ssid}" -e psk "${password}" -w com.android.tradefed.utils.wifi/.WifiUtil`
           : `am instrument -e method addOpenNetwork -e ssid "${ssid}" -w com.android.tradefed.utils.wifi/.WifiUtil`;
-        await invoke("run_adb", { args: ["-s", dev, "shell", method] }); await delay(500);
         
-        appendLog(`[${dev}] Associating & Saving...`);
-        await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method associateNetwork -e ssid "${ssid}" -w com.android.tradefed.utils.wifi/.WifiUtil`] }); await delay(500);
-        await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method saveConfiguration -w com.android.tradefed.utils.wifi/.WifiUtil`] }); await delay(500);
+        await invoke("run_adb", { args: ["-s", dev, "shell", method] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method associateNetwork -e ssid "${ssid}" -w com.android.tradefed.utils.wifi/.WifiUtil`] });
+        await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method saveConfiguration -w com.android.tradefed.utils.wifi/.WifiUtil`] });
         
-        appendLog(`[${dev}] Verifying connection...`);
         const status: string = await invoke("run_adb", { args: ["-s", dev, "shell", "dumpsys wifi | grep mNetworkInfo"] });
         appendLog(`[${dev}] Status: ${status.includes("CONNECTED/CONNECTED") ? "✓ Connected" : "⚠ Check HP"}`);
       } catch (e: any) {
         appendLog(`[${dev}] ✗ ${e}`);
       }
-    }
+    }));
+
     appendLog("──── Complete ────");
     setLoading(false);
   };

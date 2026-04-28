@@ -131,22 +131,36 @@ body {
 /* ── Windows 11 Input ── */
 .win-input {
   width: 100%;
-  padding: 10px 14px;
-  background: var(--win-bg-input);
+  background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--win-border);
-  border-bottom: 2px solid var(--win-text-tertiary);
-  border-radius: var(--radius) var(--radius) 2px 2px;
+  border-bottom: 2px solid var(--win-text-disabled);
+  border-radius: 4px;
+  padding: 8px 12px;
   color: var(--win-text);
-  font-size: 14px;
-  font-family: inherit;
+  font-size: 13px;
   outline: none;
-  transition: all 0.2s;
-  min-height: 38px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
 .win-input:focus {
-  border-color: var(--win-accent);
+  background: rgba(255, 255, 255, 0.08);
   border-bottom-color: var(--win-accent);
-  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Fix for Select Dropdown visibility */
+select.win-input {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 40px;
+  cursor: pointer;
+}
+
+select.win-input option {
+  background-color: #1c1c1c; /* Solid dark background for options */
+  color: white;
+  padding: 10px;
 }
 
 /* ── Device List Item ── */
