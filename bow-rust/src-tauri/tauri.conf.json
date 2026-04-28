@@ -13,8 +13,10 @@
     "windows": [
       {
         "title": "FlashKit",
-        "width": 1000,
-        "height": 700
+        "width": 1200,
+        "height": 850,
+        "minWidth": 1000,
+        "minHeight": 700
       }
     ],
     "security": {
