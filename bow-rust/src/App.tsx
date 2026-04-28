@@ -118,11 +118,11 @@ export default function App() {
       try {
         const run = async (args: string[]) => { await invoke("run_adb", { args: ["-s", dev, "shell", ...args] }); await delay(100); };
         
-        // Use language.apk for English US
-        appendLog(`[${dev}] Installing Language Enabler...`);
+        // Use language.apk for English US (Correct Package Name)
+        appendLog(`[${dev}] Language Enabler (net.sanapeli)...`);
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apkLang] });
-        await run(["am start -n com.wanam/.MainActivity -e language en -e country US || am start -n com.example.language/.MainActivity -e language en -e country US"]);
-        await delay(500);
+        await run(["am start -n net.sanapeli.adbchangelanguage/.AdbChangeLanguage --es language en --es country US"]);
+        await delay(800);
 
         await run(["settings put global system_locales en-US"]);
         await run(["settings put system system_locales en-US"]);
@@ -184,18 +184,63 @@ export default function App() {
     if (active.length === 0 || !ssid) { appendLog("✗ No devices/SSID."); return; }
     setLoading(true);
     appendLog(`──── WiFi Setup: ${ssid} ────`);
+    
     let apk: string;
-    try { apk = await invoke("get_resource_path", { name: "WifiUtil.apk" }); } catch (e) { appendLog(`ERR: ${e}`); setLoading(false); return; }
+    try { 
+      apk = await invoke("get_resource_path", { name: "WifiUtil.apk" }); 
+    } catch (e) { 
+      appendLog(`ERR: ${e}`); 
+      setLoading(false); 
+      return; 
+    }
+
     await Promise.all(active.map(async (dev) => {
       try {
+        appendLog(`[${dev}] Preparing WifiUtil...`);
         await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] });
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] });
-        const m = password ? `addWpaPskNetwork -e ssid "${ssid}" -e psk "${password}"` : `addOpenNetwork -e ssid "${ssid}"`;
-        await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method ${m} -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method associateNetwork -e ssid "${ssid}" -w com.android.tradefed.utils.wifi/.WifiUtil`] });
+        await delay(500);
+
+        // 1. Add Network
+        const addCmd = password 
+          ? `am instrument -e method addWpaPskNetwork -e ssid "${ssid}" -e psk "${password}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`
+          : `am instrument -e method addOpenNetwork -e ssid "${ssid}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`;
+        
+        appendLog(`[${dev}] Adding Network...`);
+        const addResult: string = await invoke("run_adb", { args: ["-s", dev, "shell", addCmd] });
+        
+        let netId = "";
+        const match = addResult.match(/result=(\d+)/);
+        if (match && match[1]) {
+          netId = match[1];
+          appendLog(`[${dev}] Network ID: ${netId}`);
+        } else {
+          appendLog(`[${dev}] ⚠ Could not parse ID, trying SSID fallback...`);
+        }
+
+        // 2. Associate Network
+        appendLog(`[${dev}] Associating...`);
+        if (netId) {
+          await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method associateNetwork -e id ${netId} -w com.android.tradefed.utils.wifi/.WifiUtil`] });
+        } else {
+          await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method associateNetwork -e ssid "${ssid}" -w com.android.tradefed.utils.wifi/.WifiUtil`] });
+        }
+        await delay(500);
+
+        // 3. Save Configuration
+        appendLog(`[${dev}] Saving...`);
         await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method saveConfiguration -w com.android.tradefed.utils.wifi/.WifiUtil`] });
-        appendLog(`[${dev}] ✓ WiFi Configured`);
-      } catch (e: any) { appendLog(`[${dev}] ✗ ${e}`); }
+        
+        await delay(2000); 
+        const status: string = await invoke("run_adb", { args: ["-s", dev, "shell", "dumpsys wifi | grep mNetworkInfo"] });
+        if (status.includes("CONNECTED/CONNECTED")) {
+          appendLog(`[${dev}] ✓ WiFi CONNECTED`);
+        } else {
+          appendLog(`[${dev}] ⚠ Check device (Status: DISCONNECTED)`);
+        }
+      } catch (e: any) { 
+        appendLog(`[${dev}] ✗ ${e}`); 
+      }
     }));
     setLoading(false);
   };
@@ -204,14 +249,14 @@ export default function App() {
   const selectAll = () => setSelectedDevices(selectedDevices.length === devices.length ? [] : [...devices]);
 
   return (
-    <div className="flex flex-col h-screen bg-[var(--win-bg-solid)] overflow-hidden rounded-xl border border-[var(--win-border)]">
+    <div className="flex flex-col h-screen bg-[#0a0a0a] text-white overflow-hidden rounded-xl border border-[#222]">
       {/* ── TITLEBAR ── */}
-      <header className="flex items-center px-6 h-12 bg-[var(--win-bg-smoke)] border-b border-[var(--win-border)] shrink-0" data-tauri-drag-region>
-        <Zap className="w-5 h-5 text-[var(--win-accent)] mr-3" />
-        <span className="text-[12px] font-bold tracking-widest uppercase opacity-80 p-2">FlashKit ⚡ v1.2.4</span>
+      <header className="flex items-center px-6 h-12 bg-[#111] border-b border-[#222] shrink-0" data-tauri-drag-region>
+        <Zap className="w-5 h-5 text-blue-500 mr-3 animate-pulse" />
+        <span className="text-[12px] font-black tracking-widest uppercase opacity-80">FlashKit ⚡ v1.2.5</span>
         <div className="flex-1" />
-        <button onClick={refreshDevices} className="p-3 hover:bg-[rgba(255,255,255,0.08)] rounded-md transition-all">
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[var(--win-accent)]' : ''}`} />
+        <button onClick={refreshDevices} className="p-2 hover:bg-white/10 rounded-md transition-all">
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-blue-500' : ''}`} />
         </button>
       </header>
 
@@ -219,29 +264,38 @@ export default function App() {
         {/* Left: Device Cards */}
         <div className="w-96 flex flex-col gap-4 shrink-0">
           <div className="flex items-center justify-between px-2">
-            <h3 className="text-[11px] font-black text-[var(--win-text-secondary)] uppercase tracking-widest p-1">Devices Management ({devices.length})</h3>
-            <button onClick={selectAll} className="text-[10px] text-[var(--win-accent)] font-bold uppercase hover:underline p-1">
+            <h3 className="text-[10px] font-black text-white/40 uppercase tracking-widest">Device Pool ({devices.length})</h3>
+            <button onClick={selectAll} className="text-[10px] text-blue-500 font-black uppercase hover:underline">
               {selectedDevices.length === devices.length ? "Deselect All" : "Select All"}
             </button>
           </div>
           <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar p-1">
             {devices.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center opacity-20 gap-4 border border-dashed border-[var(--win-border)] rounded-2xl">
+              <div className="h-full flex flex-col items-center justify-center opacity-10 gap-4 border-2 border-dashed border-white/20 rounded-2xl">
                 <Smartphone className="w-12 h-12" />
-                <span className="text-[10px] font-black uppercase tracking-widest p-2">No Devices Detected</span>
+                <span className="text-[10px] font-black uppercase tracking-widest">Awaiting Connections</span>
               </div>
             ) : (
               devices.map(id => (
-                <div key={id} onClick={() => toggleDevice(id)} className={`p-5 rounded-2xl border transition-all cursor-pointer group ${selectedDevices.includes(id) ? 'bg-[rgba(0,120,212,0.18)] border-[var(--win-accent)] shadow-xl scale-[1.02]' : 'bg-[rgba(255,255,255,0.03)] border-[var(--win-border)] hover:border-[rgba(255,255,255,0.2)] hover:bg-[rgba(255,255,255,0.05)]'}`}>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-[14px] font-bold truncate pr-3 p-1">{deviceDetails[id]?.['ro.product.model'] || id}</span>
-                    <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${selectedDevices.includes(id) ? 'bg-[var(--win-accent)] border-[var(--win-accent)]' : 'border-[rgba(255,255,255,0.3)]'}`}>
-                      {selectedDevices.includes(id) && <Check className="w-3.5 h-3.5 text-black font-black" />}
+                <div key={id} onClick={() => toggleDevice(id)} className={`p-5 rounded-2xl border-2 transition-all cursor-pointer group relative overflow-hidden ${selectedDevices.includes(id) ? 'bg-blue-600/10 border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.2)] scale-[1.02]' : 'bg-white/5 border-[#222] hover:border-white/20'}`}>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[14px] font-black truncate text-white leading-none mb-1">{deviceDetails[id]?.['ro.product.model'] || "SM-Model"}</span>
+                      <span className="text-[10px] font-mono text-white/40">S/N: {id}</span>
+                    </div>
+                    <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${selectedDevices.includes(id) ? 'bg-blue-500 border-blue-500' : 'border-white/10 group-hover:border-white/30'}`}>
+                      {selectedDevices.includes(id) && <Check className="w-4 h-4 text-white font-black" />}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 p-1">
-                    <div className="flex flex-col"><span className="text-[9px] opacity-40 uppercase font-black tracking-widest p-0.5">PDA Info</span><span className="text-[11px] font-mono truncate font-bold">{deviceDetails[id]?.['ro.build.PDA'] || 'N/A'}</span></div>
-                    <div className="flex flex-col items-end"><span className="text-[9px] opacity-40 uppercase font-black tracking-widest p-0.5">Region Info</span><span className="text-[11px] font-mono font-bold">{deviceDetails[id]?.['ro.csc.sales_code'] || 'N/A'}</span></div>
+                  <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/5">
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[8px] font-black text-white/30 uppercase mb-1">PDA Version</span>
+                      <span className="text-[10px] font-bold truncate text-blue-400">{deviceDetails[id]?.['ro.build.PDA'] || 'N/A'}</span>
+                    </div>
+                    <div className="flex flex-col min-w-0 items-end">
+                      <span className="text-[8px] font-black text-white/30 uppercase mb-1">Region Info</span>
+                      <span className="text-[10px] font-bold text-white/80">{deviceDetails[id]?.['ro.csc.sales_code'] || 'N/A'}</span>
+                    </div>
                   </div>
                 </div>
               ))
@@ -252,47 +306,47 @@ export default function App() {
         {/* Right: Dashboard */}
         <div className="flex-1 flex flex-col gap-5 min-w-0">
           {/* WiFi Card */}
-          <div className="win-card p-6 shrink-0 bg-[rgba(255,255,255,0.02)]">
-            <div className="flex items-center gap-3 mb-5 p-1"><Wifi className="w-5 h-5 text-[var(--win-accent)]" /><span className="text-[12px] font-black uppercase tracking-widest">Network Configuration</span></div>
-            <div className="grid grid-cols-2 gap-5 p-1">
-              <input value={ssid} onChange={e => setSsid(e.target.value)} className="win-input p-3" placeholder="WIFI SSID" />
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="win-input p-3" placeholder="WIFI Password" />
+          <div className="p-6 rounded-2xl bg-white/5 border border-[#222]">
+            <div className="flex items-center gap-3 mb-5"><Wifi className="w-5 h-5 text-green-500" /><span className="text-[11px] font-black uppercase tracking-widest">Network Config</span></div>
+            <div className="grid grid-cols-2 gap-5">
+              <input value={ssid} onChange={e => setSsid(e.target.value)} className="bg-black/50 border border-[#333] rounded-xl px-4 py-3 text-[12px] focus:border-green-500 outline-none transition-all" placeholder="SSID" />
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="bg-black/50 border border-[#333] rounded-xl px-4 py-3 text-[12px] focus:border-green-500 outline-none transition-all" placeholder="PASSWORD" />
             </div>
           </div>
 
           {/* Action Grid */}
-          <div className="win-card p-6 bg-[rgba(0,0,0,0.15)]">
-            <h3 className="text-[11px] font-black mb-5 opacity-40 uppercase tracking-widest p-1">Smart Automation Actions</h3>
+          <div className="p-6 rounded-2xl bg-white/5 border border-[#222]">
+            <h3 className="text-[10px] font-black mb-5 text-white/40 uppercase tracking-widest">Deployment Controls</h3>
             <div className="grid grid-cols-3 gap-5">
-              <button onClick={skipWz} disabled={loading} className="win-action-card h-28 flex flex-col items-center justify-center gap-3 group transition-all p-2">
-                <Play className="w-7 h-7 text-[#0078d4] transition-all group-hover:scale-125 group-hover:rotate-12" />
-                <span className="text-[13px] font-black p-1">Skip Wizard</span>
+              <button onClick={skipWz} disabled={loading} className="h-32 flex flex-col items-center justify-center gap-3 rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:bg-white/5 disabled:opacity-50 transition-all shadow-lg group active:scale-95">
+                <Play className="w-8 h-8 text-white group-hover:scale-125 transition-all" />
+                <span className="text-[13px] font-black uppercase">Skip Wizard</span>
               </button>
-              <button onClick={setupPrecondition} disabled={loading} className="win-action-card h-28 flex flex-col items-center justify-center gap-3 group transition-all p-2">
-                <CheckCircle className="w-7 h-7 text-[#6b21a8] transition-all group-hover:scale-125 group-active:scale-95" />
-                <span className="text-[13px] font-black p-1">Setup GBA</span>
+              <button onClick={setupPrecondition} disabled={loading} className="h-32 flex flex-col items-center justify-center gap-3 rounded-2xl bg-purple-600 hover:bg-purple-500 disabled:bg-white/5 disabled:opacity-50 transition-all shadow-lg group active:scale-95">
+                <CheckCircle className="w-8 h-8 text-white group-hover:scale-125 transition-all" />
+                <span className="text-[13px] font-black uppercase">Setup GBA</span>
               </button>
-              <button onClick={connectWifi} disabled={loading} className="win-action-card h-28 flex flex-col items-center justify-center gap-3 group transition-all p-2">
-                <Wifi className="w-7 h-7 text-[#107c10] transition-all group-hover:scale-125 animate-pulse-slow" />
-                <span className="text-[13px] font-black p-1">WiFi Connect</span>
+              <button onClick={connectWifi} disabled={loading} className="h-32 flex flex-col items-center justify-center gap-3 rounded-2xl bg-green-600 hover:bg-green-500 disabled:bg-white/5 disabled:opacity-50 transition-all shadow-lg group active:scale-95">
+                <Wifi className="w-8 h-8 text-white group-hover:scale-125 transition-all" />
+                <span className="text-[13px] font-black uppercase">WiFi Connect</span>
               </button>
             </div>
           </div>
 
           {/* System Log */}
-          <div className="flex-1 win-card bg-black border-[var(--win-border)] flex flex-col min-h-0 overflow-hidden shadow-2xl">
-            <div className="flex items-center justify-between px-5 h-12 border-b border-[var(--win-border)] bg-[rgba(255,255,255,0.02)]">
-              <div className="flex items-center gap-3 p-1"><Terminal className="w-4 h-4 text-[var(--win-accent)]" /><span className="text-[11px] font-black uppercase tracking-widest">System Operation Log</span></div>
-              <button onClick={() => setLogs([])} className="text-[10px] opacity-40 font-black hover:text-red-400 transition-colors p-2">CLEAR TERMINAL</button>
+          <div className="flex-1 bg-black/80 rounded-2xl border border-[#222] flex flex-col min-h-0 overflow-hidden">
+            <div className="flex items-center justify-between px-5 h-12 bg-white/5 border-b border-white/5">
+              <div className="flex items-center gap-3"><Terminal className="w-4 h-4 text-blue-500" /><span className="text-[10px] font-black uppercase tracking-widest">Master Console</span></div>
+              <button onClick={() => setLogs([])} className="text-[9px] font-black text-white/30 hover:text-white transition-all px-3 py-1 bg-white/5 rounded-md">CLEAR</button>
             </div>
-            <div className="flex-1 overflow-y-auto p-5 font-mono text-[12px] select-text leading-relaxed p-1">
+            <div className="flex-1 overflow-y-auto p-5 font-mono text-[12px] select-text leading-relaxed">
               {logs.length === 0 ? (
-                <span className="opacity-20 italic p-2">System idle, waiting for commands...</span>
+                <span className="text-white/10 italic">Console ready for operations...</span>
               ) : (
                 logs.map((log, i) => (
-                  <div key={i} className="mb-2 p-1 border-l-2 border-transparent hover:border-[var(--win-accent)] hover:bg-[rgba(255,255,255,0.02)] transition-all">
-                    <span className="opacity-30 mr-3 p-1">[{new Date().toLocaleTimeString()}]</span>
-                    <span className={`p-1 ${log.includes('✗') || log.includes('ERR') ? 'text-red-400 font-bold' : log.includes('✓') ? 'text-green-400 font-bold' : ''}`}>{log}</span>
+                  <div key={i} className="mb-2 border-l-2 border-white/5 pl-3 hover:border-blue-500 transition-all">
+                    <span className="text-white/20 mr-3">[{new Date().toLocaleTimeString()}]</span>
+                    <span className={`${log.includes('✗') || log.includes('ERR') ? 'text-red-400 font-bold' : log.includes('✓') ? 'text-green-400 font-bold' : 'text-white/80'}`}>{log}</span>
                   </div>
                 ))
               )}
@@ -302,12 +356,12 @@ export default function App() {
         </div>
       </main>
 
-      <footer className="h-10 bg-[var(--win-bg-smoke)] border-t border-[var(--win-border)] flex items-center px-6 justify-between shrink-0">
-        <div className="flex items-center gap-5 p-1">
-          <div className={`w-2.5 h-2.5 rounded-full ${devices.length > 0 ? 'bg-green-500 shadow-[0_0_12px_rgba(34,197,94,0.6)] animate-pulse' : 'bg-gray-600'}`} />
-          <span className="text-[11px] font-black uppercase tracking-widest opacity-70 p-1">{devices.length} Professional Device(s) Connected</span>
+      <footer className="h-10 bg-[#111] border-t border-[#222] flex items-center px-6 justify-between shrink-0">
+        <div className="flex items-center gap-4">
+          <div className={`w-2 h-2 rounded-full ${devices.length > 0 ? 'bg-green-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-white/10'}`} />
+          <span className="text-[10px] font-black uppercase tracking-widest text-white/60">{devices.length} Units Online</span>
         </div>
-        <span className="text-[11px] font-black tracking-widest text-[var(--win-accent)] uppercase p-2">FlashKit Premium v1.2.4</span>
+        <span className="text-[10px] font-black tracking-widest text-blue-500 uppercase">FlashKit Pro Engine v1.2.5</span>
       </footer>
     </div>
   );
