@@ -86,11 +86,16 @@ export default function App() {
     setLogExpanded(true);
     appendLog("──── FULL WZ SKIP (BOW ALGORITHM) ────");
     
-    let appDir: string;
-    try { appDir = await invoke("get_app_dir"); } catch { appDir = "."; }
-    const sep = appDir.includes("\\") ? "\\" : "/";
-    const apkData = `${appDir}${sep}assets${sep}Data_Saver_Test-debug.apk`;
-    const apkDataTest = `${appDir}${sep}assets${sep}Data_Saver_Test-debug-androidTest.apk`;
+    let apkData: string;
+    let apkDataTest: string;
+    try {
+      apkData = await invoke("get_resource_path", { name: "Data_Saver_Test-debug.apk" });
+      apkDataTest = await invoke("get_resource_path", { name: "Data_Saver_Test-debug-androidTest.apk" });
+    } catch (e) {
+      appendLog(`ERROR: Resources not found. ${e}`);
+      setLoading(false);
+      return;
+    }
 
     for (const dev of selectedDevices) {
       appendLog(`[${dev}] Step 1: Global & System Settings...`);
@@ -135,10 +140,15 @@ export default function App() {
     setLoading(true);
     setLogExpanded(true);
     appendLog(`──── WiFi Setup: ${ssid} ────`);
-    let appDir: string;
-    try { appDir = await invoke("get_app_dir"); } catch { appDir = "."; }
-    const sep = appDir.includes("\\") ? "\\" : "/";
-    const apk = `${appDir}${sep}assets${sep}WifiUtil.apk`;
+    
+    let apk: string;
+    try {
+      apk = await invoke("get_resource_path", { name: "WifiUtil.apk" });
+    } catch (e) {
+      appendLog(`ERROR: WifiUtil.apk not found. ${e}`);
+      setLoading(false);
+      return;
+    }
 
     for (const dev of selectedDevices) {
       try {

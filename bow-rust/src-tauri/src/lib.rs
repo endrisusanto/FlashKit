@@ -1,8 +1,22 @@
+use tauri::Manager;
 use std::process::Command;
 use std::path::PathBuf;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
+#[tauri::command]
+fn get_resource_path(app: tauri::AppHandle, name: String) -> Result<String, String> {
+    let resource_path = app.path().resource_dir()
+        .map_err(|e| e.to_string())?
+        .join("assets")
+        .join(name);
+    
+    if resource_path.exists() {
+        Ok(resource_path.to_string_lossy().to_string())
+    } else {
+        Err(format!("Resource not found at: {:?}", resource_path))
+    }
+}
 fn get_exe_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -176,7 +190,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_devices, run_adb, get_adb_version, get_app_dir, get_serial_ports, send_at_command])
+        .invoke_handler(tauri::generate_handler![get_devices, run_adb, get_adb_version, get_app_dir, get_serial_ports, send_at_command, get_resource_path])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
