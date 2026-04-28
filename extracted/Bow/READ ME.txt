@@ -1,0 +1,14 @@
+BOW VERSION 15.01.2021
+UPDATE: SETUP WIFI
+
+Huong dan su dung Bow Version moi
+B1: Nhan Refresh de cap nhat devices
+B2: Nhan Skip WZ de skip setup va cai dat Language + Wifi
+B3: Nhan Reconnect neu co devices chua dc connect wifi
+
+============================================================
+Huong Dan Sua file wifi.txt
+// File wifi.txt chua thong tin wifi ma ban muon cai dat cho thiet bi theo dinh dang sau
+
+TENWIFI PASSWORD
+vd: GBA_CELL1_50.10 abc13579
