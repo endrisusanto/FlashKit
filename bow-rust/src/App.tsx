@@ -12,7 +12,6 @@ export default function App() {
   const [ssid, setSsid] = useState("2");
   const [password, setPassword] = useState("1234qwer");
   const [logExpanded, setLogExpanded] = useState(true);
-  const [serialPorts, setSerialPorts] = useState<string[]>([]);
   const [selectedPort, setSelectedPort] = useState("");
 
   const appendLog = (msg: string) => setLogs(prev => [...prev, msg]);
@@ -27,7 +26,6 @@ export default function App() {
     
     try {
       const ports: string[] = await invoke("get_serial_ports");
-      setSerialPorts(ports);
       const autoPort: string | null = await invoke("get_samsung_port");
       if (autoPort) {
         setSelectedPort(autoPort);
@@ -425,40 +423,6 @@ export default function App() {
                     Auto-Provision
                   </span>
                 </button>
-              </div>
-            </section>
-
-            {/* ADB Exploit via COM */}
-            <section className="mt-8">
-              <h3 className="text-[13px] font-semibold mb-3 text-[var(--win-text-secondary)]">ADB Exploit (Virtual COM)</h3>
-              <div className="win-card p-5 bg-[rgba(255,165,0,0.05)] border-[rgba(255,165,0,0.2)]">
-                <div className="flex items-end gap-4">
-                  <div className="flex-1">
-                    <label className="block text-[12px] text-[var(--win-text-tertiary)] mb-2 uppercase tracking-tight font-bold">Modem Port</label>
-                    <select
-                      value={selectedPort}
-                      onChange={e => setSelectedPort(e.target.value)}
-                      className="win-input !border-b-[var(--win-warning)] cursor-pointer"
-                    >
-                      {serialPorts.length === 0 ? (
-                        <option value="">No ports detected</option>
-                      ) : (
-                        serialPorts.map(p => <option key={p} value={p}>{p}</option>)
-                      )}
-                    </select>
-                  </div>
-                  <button
-                    onClick={() => sendAT()}
-                    disabled={loading || !selectedPort}
-                    className="win-btn-accent !bg-[var(--win-warning)] !text-black hover:!opacity-90 flex items-center gap-2 h-[38px] px-6"
-                  >
-                    <Zap className="w-4 h-4" />
-                    Force AT Exploit
-                  </button>
-                </div>
-                <p className="text-[11px] text-[var(--win-text-disabled)] mt-3">
-                  Automatic Samsung Modem detection is enabled.
-                </p>
               </div>
             </section>
           </div>
