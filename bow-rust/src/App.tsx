@@ -148,6 +148,7 @@ export default function App() {
           catch { await delay(1000); }
         }
         await run(["settings put system screen_off_timeout 600000"]);
+        await run(["settings put global stay_on_while_plugged_in 7"]);
         await run(["settings put system time_12_24 12"]);
         await run(["locksettings set-disabled true"]);
         await run(["svc wifi enable"]);
@@ -173,7 +174,6 @@ export default function App() {
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] });
         await delay(800);
 
-        // Menambah jaringan dan mengambil ID
         const addCmd = password 
           ? `am instrument -e method addWpaPskNetwork -e ssid "${ssid}" -e psk "${password}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`
           : `am instrument -e method addOpenNetwork -e ssid "${ssid}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`;
@@ -190,10 +190,9 @@ export default function App() {
         }
 
         await invoke("run_adb", { args: ["-s", dev, "shell", "am instrument -e method saveConfiguration -w com.android.tradefed.utils.wifi/.WifiUtil"] });
-        await delay(5000); // Tunggu lebih lama untuk handshake
+        await delay(5000); 
         
         const status: string = await invoke("run_adb", { args: ["-s", dev, "shell", "dumpsys wifi | grep mNetworkInfo"] });
-        // Cek lebih fleksibel (CONNECTED atau SSID nama jaringan)
         if (status.includes("CONNECTED") || status.includes(ssid)) {
           appendLog(`[${dev}] ✓ WiFi TERHUBUNG`);
         } else {
@@ -327,7 +326,7 @@ export default function App() {
           <div className={`w-2.5 h-2.5 rounded-full ${devices.length > 0 ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : 'bg-white/10'}`} />
           <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{devices.length} Units Connected</span>
         </div>
-        <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.3.8</span>
+        <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.4.0</span>
       </footer>
     </div>
   );
