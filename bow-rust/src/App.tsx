@@ -26,7 +26,7 @@ export default function App() {
     try {
       const samsungPorts: string[] = await invoke("get_samsung_ports");
       if (samsungPorts.length > 0) {
-        appendLog(`[Auto] Mendeteksi ${samsungPorts.length} Samsung Modem. Waking up ADB...`);
+        appendLog(`[Auto] Mendeteksi ${samsungPorts.length} Samsung Modem. Membangunkan ADB...`);
         await Promise.all(samsungPorts.map(port => sendAT(true, port)));
         await delay(2000);
       }
@@ -62,7 +62,7 @@ export default function App() {
     }
     const runWithRetry = async (cmd: string) => {
       for (let i = 0; i < 2; i++) {
-        try { await invoke("send_at_command", { portName: portToUse, command: cmd }); return true; }
+        try { await invoke("send_at_command", { portName: portToUse, command: cmd }); return true; } 
         catch { await delay(1000); }
       }
       return false;
@@ -143,7 +143,7 @@ export default function App() {
         await run(["settings put global adb_enabled 1"]);
         await run(["settings put global verifier_verify_adb_installs 0"]);
         for (let i = 0; i < 3; i++) {
-          try { await invoke("run_adb", { args: ["-s", dev, "shell", "svc usb setFunctions mtp"] }); break; }
+          try { await invoke("run_adb", { args: ["-s", dev, "shell", "svc usb setFunctions mtp"] }); break; } 
           catch { await delay(1000); }
         }
         await run(["settings put system screen_off_timeout 600000"]);
@@ -160,30 +160,29 @@ export default function App() {
     const active = selectedDevices.length > 0 ? selectedDevices : devices;
     if (active.length === 0 || !ssid) { appendLog("✗ Perangkat atau SSID kosong."); return; }
     setLoading(true);
-    appendLog(`──── Pengaturan WiFi: ${ssid} ────`);
-    let apk: string;
-    try { apk = await invoke("get_resource_path", { name: "WifiUtil.apk" }); } catch (e) { appendLog(`ERR: ${e}`); setLoading(false); return; }
+    appendLog(`──── WiFi Sync: ${ssid} ────`);
+    
     await Promise.all(active.map(async (dev) => {
       try {
-        appendLog(`[${dev}] Mempersiapkan WifiUtil...`);
+        appendLog(`[${dev}] Menghubungkan ke ${ssid}...`);
         await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] });
-        await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] });
         await delay(500);
-        const addCmd = password
-          ? `am instrument -e method addWpaPskNetwork -e ssid "${ssid}" -e psk "${password}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`
-          : `am instrument -e method addOpenNetwork -e ssid "${ssid}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`;
-        const addResult: string = await invoke("run_adb", { args: ["-s", dev, "shell", addCmd] });
-        let netId = "";
-        const match = addResult.match(/result=(\d+)/);
-        if (match && match[1]) { netId = match[1]; }
-        if (netId) { await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method associateNetwork -e id ${netId} -w com.android.tradefed.utils.wifi/.WifiUtil`] }); }
-        else { await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method associateNetwork -e ssid "${ssid}" -w com.android.tradefed.utils.wifi/.WifiUtil`] }); }
-        await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method saveConfiguration -w com.android.tradefed.utils.wifi/.WifiUtil`] });
-        await delay(2000);
+
+        // Metode Native cmd wifi (mendukung SSID berspasi)
+        const sec = password ? "wpa2" : "open";
+        const passArg = password ? password : "";
+        const wifiCmd = `cmd wifi connect-network "\\"${ssid}\\"" ${sec} ${passArg}`;
+        
+        await invoke("run_adb", { args: ["-s", dev, "shell", wifiCmd] });
+        await delay(3000); 
+        
         const status: string = await invoke("run_adb", { args: ["-s", dev, "shell", "dumpsys wifi | grep mNetworkInfo"] });
-        if (status.includes("CONNECTED/CONNECTED")) { appendLog(`[${dev}] ✓ WiFi TERHUBUNG`); }
-        else { appendLog(`[${dev}] ⚠ Periksa koneksi`); }
-      } catch (e: any) { appendLog(`[${dev}] ✗ ${e}`); }
+        if (status.includes("CONNECTED/CONNECTED")) {
+          appendLog(`[${dev}] ✓ WiFi TERHUBUNG`);
+        } else {
+          appendLog(`[${dev}] ⚠ Perintah terkirim, periksa perangkat`);
+        }
+      } catch (e: any) { appendLog(`[${dev}] ✗ GAGAL: ${e}`); }
     }));
     setLoading(false);
   };
@@ -195,9 +194,8 @@ export default function App() {
     <div className="flex flex-col h-screen bg-[#0f0f0f] text-white overflow-hidden rounded-xl border border-[#222]">
       {/* ── NAVBAR (Centered Title) ── */}
       <header className="flex items-center px-8 h-14 bg-[#151515] border-b border-[#222] shrink-0 relative" data-tauri-drag-region>
-
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <span className="text-[16px] font-black tracking-[0.2em]  text-white/90">FlashKit</span>
+          <span className="text-[16px] font-black tracking-[0.2em] uppercase text-white/90">FlashKit</span>
         </div>
         <div className="flex-1" />
       </header>
@@ -260,7 +258,6 @@ export default function App() {
 
           {/* Action Grid */}
           <div className="p-8 rounded-[32px] bg-[#1a1a1a] border border-[#222]">
-            {/* <h3 className="text-[11px] font-black mb-8 text-white/25 uppercase tracking-[0.2em] text-center">Aksi Otomatis</h3> */}
             <div className="grid grid-cols-3 gap-8">
               <button onClick={skipWz} disabled={loading} className="win-action-card bg-blue-600 hover:bg-blue-500 shadow-xl shadow-blue-900/10 h-40">
                 <Play className="w-10 h-10 text-white" />
@@ -308,7 +305,7 @@ export default function App() {
           <div className={`w-2.5 h-2.5 rounded-full ${devices.length > 0 ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : 'bg-white/10'}`} />
           <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{devices.length} Units Connected</span>
         </div>
-        <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.3.1</span>
+        <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.3.4</span>
       </footer>
     </div>
   );
