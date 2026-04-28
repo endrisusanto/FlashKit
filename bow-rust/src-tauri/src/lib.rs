@@ -99,31 +99,70 @@ fn get_devices() -> Result<Vec<String>, String> {
 #[tauri::command]
 fn run_adb(args: Vec<String>) -> Result<String, String> {
     let adb_path = find_adb();
+    let mut last_err = String::new();
 
-    #[cfg(target_os = "windows")]
-    let output = Command::new(&adb_path)
-        .args(&args)
-        .creation_flags(0x08000000) // CREATE_NO_WINDOW
-        .output()
-        .map_err(|e| e.to_string())?;
+    // Stabilization delay to prevent "error: closed"
+    std::thread::sleep(std::time::Duration::from_millis(300));
 
-    #[cfg(not(target_os = "windows"))]
-    let output = Command::new(&adb_path)
-        .args(&args)
-        .output()
-        .map_err(|e| e.to_string())?;
+    for attempt in 1..=3 {
+        let mut cmd = Command::new(&adb_path);
+        cmd.args(&args);
 
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
-    if !output.status.success() {
-        if !stderr.is_empty() {
-            return Err(stderr);
+        let output = cmd.output().map_err(|e| e.to_string())?;
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+        if output.status.success() {
+            return Ok(stdout);
         }
-        return Err(stdout);
+
+        last_err = if !stderr.is_empty() { stderr.clone() } else { stdout.clone() };
+
+        // If it's a connection error, wait and retry
+        if last_err.contains("closed") || last_err.contains("device not found") {
+            std::thread::sleep(std::time::Duration::from_millis(1000 * attempt));
+            continue;
+        } else {
+            break; // Other errors don't need retry
+        }
     }
 
-    Ok(stdout)
+    Err(last_err)
+}
+
+#[tauri::command]
+fn get_serial_ports() -> Vec<String> {
+    match serialport::available_ports() {
+        Ok(ports) => ports.into_iter().map(|p| p.port_name).collect(),
+        Err(_) => vec![],
+    }
+}
+
+#[tauri::command]
+fn send_at_command(port_name: String, command: String) -> Result<String, String> {
+    use std::io::{Read, Write};
+    use std::time::Duration;
+
+    let mut port = serialport::new(&port_name, 9600)
+        .timeout(Duration::from_millis(2000))
+        .open()
+        .map_err(|e| format!("Failed to open port {}: {}", port_name, e))?;
+
+    let cmd = format!("{}\r\n", command);
+    port.write_all(cmd.as_bytes())
+        .map_err(|e| format!("Failed to write to port: {}", e))?;
+
+    let mut buffer: Vec<u8> = vec![0; 1024];
+    match port.read(buffer.as_mut_slice()) {
+        Ok(t) => {
+            let response = String::from_utf8_lossy(&buffer[..t]).to_string();
+            Ok(response)
+        }
+        Err(e) => Err(format!("Failed to read from port: {}", e)),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -137,7 +176,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_devices, run_adb, get_adb_version, get_app_dir])
+        .invoke_handler(tauri::generate_handler![get_devices, run_adb, get_adb_version, get_app_dir, get_serial_ports, send_at_command])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
