@@ -157,29 +157,39 @@ export default function App() {
     await Promise.all(activeDevices.map(async (dev) => {
       appendLog(`[${dev}] Starting process...`);
       try {
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global system_locales en-US"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global stay_on_while_plugged_in 7"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global device_provisioned 1"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put secure user_setup_complete 1"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system samsung_eula_agree 1"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system screen_off_timeout 600000"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system time_12_24 12"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "locksettings set-disabled true"] });
+        const run = async (args: string[]) => {
+          await invoke("run_adb", { args: ["-s", dev, "shell", ...args] });
+          await delay(100); // Micro-delay to prevent UI freeze
+        };
+
+        await run(["settings put global system_locales en-US"]);
+        await run(["settings put global stay_on_while_plugged_in 7"]);
+        await run(["settings put global device_provisioned 1"]);
+        await run(["settings put secure user_setup_complete 1"]);
+        await run(["settings put system samsung_eula_agree 1"]);
+        await run(["settings put system screen_off_timeout 600000"]);
+        await run(["settings put system time_12_24 12"]);
+        await run(["locksettings set-disabled true"]);
         
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apkData] });
+        await delay(200);
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apkDataTest] });
+        await delay(200);
         
         await invoke("run_adb", { args: ["-s", dev, "shell", "am instrument -w -m -e debug false -e class 'com.example.DataSaver.ExampleInstrumentedTest' com.example.DataSaver.test/androidx.test.runner.AndroidJUnitRunner"] });
+        await delay(500);
         
-        await invoke("run_adb", { args: ["-s", dev, "shell", "pm disable-user com.sec.android.app.SecSetupWizard"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "pm disable-user com.google.android.setupwizard"] });
+        await run(["pm disable-user com.sec.android.app.SecSetupWizard"]);
+        await run(["pm disable-user com.google.android.setupwizard"]);
         
         await invoke("run_adb", { args: ["-s", dev, "uninstall", "com.example.DataSaver"] });
+        await delay(100);
         await invoke("run_adb", { args: ["-s", dev, "uninstall", "com.example.DataSaver.test"] });
+        await delay(100);
         
-        await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global wifi_on 1"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "input keyevent KEYCODE_HOME"] });
+        await run(["svc wifi enable"]);
+        await run(["settings put global wifi_on 1"]);
+        await run(["input keyevent KEYCODE_HOME"]);
         appendLog(`[${dev}] ✓ SUCCESS`);
       } catch (e: any) {
         appendLog(`[${dev}] ✗ FAILED: ${e}`);
@@ -201,13 +211,31 @@ export default function App() {
     
     await Promise.all(activeDevices.map(async (dev) => {
       try {
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global development_settings_enabled 1"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global adb_enabled 1"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "svc usb setFunctions mtp"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system screen_off_timeout 600000"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system time_12_24 12"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "locksettings set-disabled true"] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] });
+        const run = async (args: string[]) => {
+          await invoke("run_adb", { args: ["-s", dev, "shell", ...args] });
+          await delay(100);
+        };
+
+        await run(["settings put global development_settings_enabled 1"]);
+        await run(["settings put global adb_enabled 1"]);
+        
+        // USB MTP Retry Logic
+        let usbSuccess = false;
+        for (let i = 0; i < 3; i++) {
+          try {
+            await invoke("run_adb", { args: ["-s", dev, "shell", "svc usb setFunctions mtp"] });
+            usbSuccess = true;
+            break;
+          } catch (e) {
+            await delay(1000);
+          }
+        }
+        if (!usbSuccess) appendLog(`[${dev}] ⚠ USB MTP failed after retries`);
+
+        await run(["settings put system screen_off_timeout 600000"]);
+        await run(["settings put system time_12_24 12"]);
+        await run(["locksettings set-disabled true"]);
+        await run(["svc wifi enable"]);
         appendLog(`[${dev}] ✓ GBA & Dev Settings Applied`);
       } catch (e: any) {
         appendLog(`[${dev}] ✗ ${e}`);
@@ -228,7 +256,7 @@ export default function App() {
       return;
     }
 
-    appendLog(`──── WiFi Setup (Parallel): ${ssid} ────`);
+    appendLog(`──── WiFi Setup (Parallel + Hidden): ${ssid} ────`);
     
     let apk: string;
     try {
@@ -245,9 +273,10 @@ export default function App() {
         await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] });
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] });
         
+        // Added -e hidden true for hidden networks
         const method = password
-          ? `am instrument -e method addWpaPskNetwork -e ssid "${ssid}" -e psk "${password}" -w com.android.tradefed.utils.wifi/.WifiUtil`
-          : `am instrument -e method addOpenNetwork -e ssid "${ssid}" -w com.android.tradefed.utils.wifi/.WifiUtil`;
+          ? `am instrument -e method addWpaPskNetwork -e ssid "${ssid}" -e psk "${password}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`
+          : `am instrument -e method addOpenNetwork -e ssid "${ssid}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`;
         
         await invoke("run_adb", { args: ["-s", dev, "shell", method] });
         await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method associateNetwork -e ssid "${ssid}" -w com.android.tradefed.utils.wifi/.WifiUtil`] });
