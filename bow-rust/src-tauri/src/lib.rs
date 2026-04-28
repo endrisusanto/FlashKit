@@ -9,12 +9,18 @@ fn get_resource_path(app: tauri::AppHandle, name: String) -> Result<String, Stri
     let resolver = app.path();
     let resource_dir = resolver.resource_dir().map_err(|e| e.to_string())?;
     
-    // Coba beberapa kemungkinan path (Standard, Assets, dan _up_)
-    let paths = vec![
-        resource_dir.join("assets").join(&name),
-        resource_dir.join(&name),
-        resource_dir.parent().unwrap_or(&resource_dir).join("_up_").join("assets").join(&name),
-    ];
+    let mut paths = vec![];
+    
+    // 1. Coba folder _up_/assets (Prioritas utama untuk versi install)
+    if let Some(parent) = resource_dir.parent() {
+        paths.push(parent.join("_up_").join("assets").join(&name));
+    }
+    
+    // 2. Cek folder assets (Untuk versi portable/development)
+    paths.push(resource_dir.join("assets").join(&name));
+    
+    // 3. Cek folder resource_dir langsung
+    paths.push(resource_dir.join(&name));
 
     for path in paths {
         if path.exists() {
@@ -22,7 +28,7 @@ fn get_resource_path(app: tauri::AppHandle, name: String) -> Result<String, Stri
         }
     }
     
-    Err(format!("Resource '{}' not found in any standard location", name))
+    Err(format!("Resource '{}' not found. Please check AppData structure.", name))
 }
 fn get_exe_dir() -> PathBuf {
     std::env::current_exe()
@@ -155,6 +161,22 @@ fn run_adb(args: Vec<String>) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn get_samsung_port() -> Option<String> {
+    if let Ok(ports) = serialport::available_ports() {
+        for p in ports {
+            if let serialport::SerialPortType::UsbPort(info) = &p.port_type {
+                let manufacturer = info.manufacturer.as_deref().unwrap_or("").to_lowercase();
+                let product = info.product.as_deref().unwrap_or("").to_lowercase();
+                if manufacturer.contains("samsung") || product.contains("samsung") || product.contains("modem") {
+                    return Some(p.port_name);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command]
 fn get_serial_ports() -> Vec<String> {
     match serialport::available_ports() {
         Ok(ports) => ports.into_iter().map(|p| p.port_name).collect(),
@@ -201,7 +223,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_devices, run_adb, get_adb_version, get_app_dir, get_serial_ports, send_at_command, get_resource_path])
+        .invoke_handler(tauri::generate_handler![get_devices, run_adb, get_adb_version, get_app_dir, get_serial_ports, send_at_command, get_resource_path, get_samsung_port])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

