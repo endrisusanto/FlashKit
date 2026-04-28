@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, Play, Wifi, Smartphone, Check, Terminal, CheckCircle } from "lucide-react";
+import { RefreshCw, Play, Wifi, Smartphone, Check, Terminal, Settings, ChevronRight } from "lucide-react";
 
 export default function App() {
   const [devices, setDevices] = useState<string[]>([]);
@@ -12,11 +12,23 @@ export default function App() {
   const [ssid, setSsid] = useState("RTT / IEEE 802.11");
   const [password, setPassword] = useState("1234qwer");
 
+  // Master Sequence States
+  const [seqSkipWz, setSeqSkipWz] = useState(localStorage.getItem('seqSkipWz') !== 'false');
+  const [seqGba, setSeqGba] = useState(localStorage.getItem('seqGba') !== 'false');
+  const [seqWifi, setSeqWifi] = useState(localStorage.getItem('seqWifi') !== 'false');
+  const [currentStep, setCurrentStep] = useState<number | null>(null);
+
   const appendLog = (msg: string) => setLogs(prev => [...prev, msg]);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
+
+  useEffect(() => {
+    localStorage.setItem('seqSkipWz', String(seqSkipWz));
+    localStorage.setItem('seqGba', String(seqGba));
+    localStorage.setItem('seqWifi', String(seqWifi));
+  }, [seqSkipWz, seqGba, seqWifi]);
 
   const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -80,27 +92,26 @@ export default function App() {
     }
   };
 
-  const skipWz = async () => {
-    setLoading(true);
+  const skipWz = async (isSequence = false) => {
+    if (!isSequence) setLoading(true);
     appendLog("Tahap 1: Inisialisasi AT Exploit...");
     const ports: string[] = await invoke("get_samsung_ports");
     if (ports.length > 0) { await Promise.all(ports.map(p => sendAT(false, p))); await delay(2500); }
     const list: string[] = await invoke("get_devices");
     const active = list.length > 0 ? list : selectedDevices;
-    if (active.length === 0) { appendLog("✗ Perangkat tidak ditemukan."); setLoading(false); return; }
+    if (active.length === 0) { appendLog("✗ Perangkat tidak ditemukan."); if (!isSequence) setLoading(false); return; }
 
     let apkData: string, apkTest: string, apkLang: string;
     try {
       apkData = await invoke("get_resource_path", { name: "Data_Saver_Test-debug.apk" });
       apkTest = await invoke("get_resource_path", { name: "Data_Saver_Test-debug-androidTest.apk" });
       apkLang = await invoke("get_resource_path", { name: "language.apk" });
-    } catch (e) { appendLog(`ERROR: APK tidak ditemukan. ${e}`); setLoading(false); return; }
+    } catch (e) { appendLog(`ERROR: APK tidak ditemukan. ${e}`); if (!isSequence) setLoading(false); return; }
 
     await Promise.all(active.map(async (dev) => {
-      appendLog(`[${dev}] Memproses...`);
+      appendLog(`[${dev}] Memproses Skip Wizard...`);
       try {
         const run = async (args: string[]) => { await invoke("run_adb", { args: ["-s", dev, "shell", ...args] }); await delay(100); };
-        appendLog(`[${dev}] Mengatur Bahasa (English US)...`);
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apkLang] });
         await run(["am start -n net.sanapeli.adbchangelanguage/.AdbChangeLanguage --es language en --es country US"]);
         await delay(800);
@@ -126,17 +137,17 @@ export default function App() {
         await run(["svc wifi enable"]);
         await run(["settings put global wifi_on 1"]);
         await run(["input keyevent KEYCODE_HOME"]);
-        appendLog(`[${dev}] ✓ BERHASIL`);
+        appendLog(`[${dev}] ✓ SKIP WIZARD BERHASIL`);
       } catch (e: any) { appendLog(`[${dev}] ✗ GAGAL: ${e}`); }
     }));
-    setLoading(false);
+    if (!isSequence) setLoading(false);
   };
 
-  const setupPrecondition = async () => {
+  const setupPrecondition = async (isSequence = false) => {
     const active = selectedDevices.length > 0 ? selectedDevices : devices;
     if (active.length === 0) { appendLog("✗ Perangkat tidak terpilih."); return; }
-    setLoading(true);
-    appendLog("──── Setup Precondition (Paralel) ────");
+    if (!isSequence) setLoading(true);
+    appendLog("──── Setup Precondition ────");
     await Promise.all(active.map(async (dev) => {
       try {
         const run = async (args: string[]) => { await invoke("run_adb", { args: ["-s", dev, "shell", ...args] }); await delay(100); };
@@ -152,27 +163,27 @@ export default function App() {
         await run(["settings put system time_12_24 12"]);
         await run(["locksettings set-disabled true"]);
         await run(["svc wifi enable"]);
-        appendLog(`[${dev}] ✓ OK`);
+        appendLog(`[${dev}] ✓ SETUP GBA OK`);
       } catch (e: any) { appendLog(`[${dev}] ✗ ${e}`); }
     }));
-    setLoading(false);
+    if (!isSequence) setLoading(false);
   };
 
-  const connectWifi = async () => {
+  const connectWifi = async (isSequence = false) => {
     const active = selectedDevices.length > 0 ? selectedDevices : devices;
     if (active.length === 0 || !ssid) { appendLog("✗ Perangkat atau SSID kosong."); return; }
-    setLoading(true);
-    appendLog(`──── WiFi Sync: ${ssid} (WifiUtil) ────`);
+    if (!isSequence) setLoading(true);
+    appendLog(`──── WiFi Sync: ${ssid} ────`);
     
     let apk: string;
-    try { apk = await invoke("get_resource_path", { name: "WifiUtil.apk" }); } catch (e) { appendLog(`ERR: ${e}`); setLoading(false); return; }
+    try { apk = await invoke("get_resource_path", { name: "WifiUtil.apk" }); } catch (e) { appendLog(`ERR: ${e}`); if (!isSequence) setLoading(false); return; }
 
     await Promise.all(active.map(async (dev) => {
       try {
-        appendLog(`[${dev}] Menyiapkan WifiUtil...`);
+        appendLog(`[${dev}] Mengirim profil WiFi...`);
         await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] });
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] });
-        await delay(800);
+        await delay(500);
 
         const addCmd = password 
           ? `am instrument -e method addWpaPskNetwork -e ssid "${ssid}" -e psk "${password}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`
@@ -190,17 +201,44 @@ export default function App() {
         }
 
         await invoke("run_adb", { args: ["-s", dev, "shell", "am instrument -e method saveConfiguration -w com.android.tradefed.utils.wifi/.WifiUtil"] });
-        await delay(5000); 
         
-        const status: string = await invoke("run_adb", { args: ["-s", dev, "shell", "dumpsys wifi | grep mNetworkInfo"] });
-        if (status.includes("CONNECTED") || status.includes(ssid)) {
-          appendLog(`[${dev}] ✓ WiFi TERHUBUNG`);
-        } else {
-          appendLog(`[${dev}] ⚠ Cek manual (Status: ${status.split('\n')[0].trim()})`);
-        }
+        // Hapus verifikasi WiFi seperti yang diminta
+        appendLog(`[${dev}] ✓ WiFi SYNC SELESAI`);
       } catch (e: any) { appendLog(`[${dev}] ✗ GAGAL: ${e}`); }
     }));
+    if (!isSequence) setLoading(false);
+  };
+
+  const runMasterSequence = async () => {
+    if (!seqSkipWz && !seqGba && !seqWifi) {
+      appendLog("✗ Tidak ada aksi yang diaktifkan di Master Sequence.");
+      return;
+    }
+    
+    setLoading(true);
+    appendLog("==== MEMULAI MASTER SEQUENCE ====");
+
+    if (seqSkipWz) {
+      setCurrentStep(1);
+      await skipWz(true);
+      await delay(2000);
+    }
+
+    if (seqGba) {
+      setCurrentStep(2);
+      await setupPrecondition(true);
+      await delay(2000);
+    }
+
+    if (seqWifi) {
+      setCurrentStep(3);
+      await connectWifi(true);
+      await delay(2000);
+    }
+
+    setCurrentStep(null);
     setLoading(false);
+    appendLog("==== MASTER SEQUENCE SELESAI ====");
   };
 
   const toggleDevice = (id: string) => setSelectedDevices(p => p.includes(id) ? p.filter(d => d !== id) : [...p, id]);
@@ -265,11 +303,14 @@ export default function App() {
 
         {/* Right: Dashboard */}
         <div className="flex-1 flex flex-col gap-8 min-w-0">
-          {/* WiFi Card */}
+          
+          {/* WIFI CONFIG CARD */}
           <div className="p-8 bg-[#1a1a1a] border border-[#222]">
-            <div className="flex items-center justify-center gap-3 mb-8">
-              <Wifi className="w-5 h-5 text-green-500" />
-              <span className="text-[12px] font-black uppercase tracking-widest text-center">Pengaturan WiFi</span>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <Wifi className="w-4 h-4 text-white/40" />
+                <span className="text-[11px] font-black uppercase tracking-widest text-white/40">Pengaturan WiFi</span>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-8">
               <input value={ssid} onChange={e => setSsid(e.target.value)} className="win-input px-6 py-4" placeholder="Nama WiFi (SSID)" style={{ borderRadius: '0px !important' }} />
@@ -277,22 +318,88 @@ export default function App() {
             </div>
           </div>
 
-          {/* Action Grid */}
-          <div className="p-8 bg-[#1a1a1a] border border-[#222]">
-            <div className="grid grid-cols-3 gap-8">
-              <button onClick={skipWz} disabled={loading} className="win-action-card bg-blue-600 hover:bg-blue-500 shadow-xl shadow-blue-900/10 h-40" style={{ borderRadius: '0px !important' }}>
-                <Play className="w-10 h-10 text-white" />
-                <span className="text-[13px] font-black uppercase tracking-tight">Skip Wizard</span>
-              </button>
-              <button onClick={setupPrecondition} disabled={loading} className="win-action-card bg-purple-600 hover:bg-purple-500 shadow-xl shadow-purple-900/10 h-40" style={{ borderRadius: '0px !important' }}>
-                <CheckCircle className="w-10 h-10 text-white" />
-                <span className="text-[13px] font-black uppercase tracking-tight">Setup GBA</span>
-              </button>
-              <button onClick={connectWifi} disabled={loading} className="win-action-card bg-green-600 hover:bg-green-500 shadow-xl shadow-green-900/10 h-40" style={{ borderRadius: '0px !important' }}>
-                <Wifi className="w-10 h-10 text-white" />
-                <span className="text-[13px] font-black uppercase tracking-tight">WiFi Sync</span>
+          {/* MASTER SEQUENCE CARD 1x4 */}
+          <div className="p-8 bg-[#1a1a1a] border border-[#222] relative overflow-hidden">
+            {/* Breadcrumb Header */}
+            <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center gap-3">
+                <Settings className={`w-5 h-5 ${currentStep !== null ? 'text-blue-500 animate-spin-slow' : 'text-white'}`} />
+                <span className="text-[13px] font-black uppercase tracking-widest">Master Sequence</span>
+              </div>
+              
+              {/* Animated Breadcrumb Progress */}
+              <div className="flex items-center gap-2">
+                <div className={`flex items-center gap-2 transition-all duration-500 ${!seqSkipWz ? 'hidden' : ''} ${currentStep === 1 ? 'opacity-100' : (currentStep && currentStep > 1 ? 'opacity-30' : 'opacity-10')}`}>
+                  <span className={`text-[10px] font-black uppercase tracking-widest ${currentStep === 1 ? 'text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.8)]' : ''}`}>Skip WZ</span>
+                  <ChevronRight className="w-3 h-3" />
+                </div>
+                <div className={`flex items-center gap-2 transition-all duration-500 ${!seqGba ? 'hidden' : ''} ${currentStep === 2 ? 'opacity-100' : (currentStep && currentStep > 2 ? 'opacity-30' : 'opacity-10')}`}>
+                  <span className={`text-[10px] font-black uppercase tracking-widest ${currentStep === 2 ? 'text-purple-400 drop-shadow-[0_0_8px_rgba(192,132,252,0.8)]' : ''}`}>Setup GBA</span>
+                  <ChevronRight className="w-3 h-3" />
+                </div>
+                <div className={`flex items-center gap-2 transition-all duration-500 ${!seqWifi ? 'hidden' : ''} ${currentStep === 3 ? 'opacity-100' : 'opacity-10'}`}>
+                  <span className={`text-[10px] font-black uppercase tracking-widest ${currentStep === 3 ? 'text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.8)]' : ''}`}>WiFi Sync</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 gap-6">
+              {/* Toggle Skip Wz */}
+              <div 
+                onClick={() => !loading && setSeqSkipWz(!seqSkipWz)}
+                className={`p-6 border transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqSkipWz ? 'border-blue-500 bg-blue-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}
+                style={{ borderRadius: '0px !important' }}
+              >
+                <div className={`w-5 h-5 border flex items-center justify-center transition-all ${seqSkipWz ? 'bg-blue-500 border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'border-white/20'}`} style={{ borderRadius: '0px !important' }}>
+                  {seqSkipWz && <Check className="w-3 h-3 text-white font-black" />}
+                </div>
+                <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqSkipWz ? 'text-blue-400' : 'text-white/40'}`}>Skip Wizard</span>
+              </div>
+
+              {/* Toggle GBA */}
+              <div 
+                onClick={() => !loading && setSeqGba(!seqGba)}
+                className={`p-6 border transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqGba ? 'border-purple-500 bg-purple-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}
+                style={{ borderRadius: '0px !important' }}
+              >
+                <div className={`w-5 h-5 border flex items-center justify-center transition-all ${seqGba ? 'bg-purple-500 border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.5)]' : 'border-white/20'}`} style={{ borderRadius: '0px !important' }}>
+                  {seqGba && <Check className="w-3 h-3 text-white font-black" />}
+                </div>
+                <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqGba ? 'text-purple-400' : 'text-white/40'}`}>Setup GBA</span>
+              </div>
+
+              {/* Toggle WiFi */}
+              <div 
+                onClick={() => !loading && setSeqWifi(!seqWifi)}
+                className={`p-6 border transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqWifi ? 'border-green-500 bg-green-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}
+                style={{ borderRadius: '0px !important' }}
+              >
+                <div className={`w-5 h-5 border flex items-center justify-center transition-all ${seqWifi ? 'bg-green-500 border-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'border-white/20'}`} style={{ borderRadius: '0px !important' }}>
+                  {seqWifi && <Check className="w-3 h-3 text-white font-black" />}
+                </div>
+                <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqWifi ? 'text-green-400' : 'text-white/40'}`}>WiFi Sync</span>
+              </div>
+
+              {/* Execute Button */}
+              <button 
+                onClick={runMasterSequence}
+                disabled={loading || (!seqSkipWz && !seqGba && !seqWifi)}
+                className={`transition-all font-black uppercase tracking-widest text-[14px] flex flex-col items-center justify-center gap-3 border-2 ${loading ? 'bg-[#111] border-[#333] text-white/40 cursor-not-allowed' : 'bg-white text-black border-white hover:bg-gray-200 disabled:opacity-30'}`}
+                style={{ borderRadius: '0px !important' }}
+              >
+                {loading && currentStep !== null ? (
+                   <RefreshCw className="w-7 h-7 animate-spin" />
+                ) : (
+                   <Play className="w-7 h-7" />
+                )}
+                <span>{loading && currentStep !== null ? 'Memproses...' : 'Jalankan'}</span>
               </button>
             </div>
+            
+            {/* Loading Progress Bar at bottom of card */}
+            {loading && currentStep !== null && (
+              <div className="absolute bottom-0 left-0 h-1 bg-blue-500 w-full animate-pulse"></div>
+            )}
           </div>
 
           {/* System Log */}
@@ -311,7 +418,7 @@ export default function App() {
                 logs.map((log, i) => (
                   <div key={i} className="mb-3 border-l-2 border-white/5 pl-5 hover:border-blue-500 transition-all py-1 hover:bg-white/[0.02]">
                     <span className="text-white/20 mr-5 font-normal">[{new Date().toLocaleTimeString()}]</span>
-                    <span className={`${log.includes('✗') || log.includes('ERR') || log.includes('GAGAL') ? 'text-red-400 font-bold' : log.includes('✓') || log.includes('BERHASIL') ? 'text-green-400 font-bold' : 'text-white/75'}`}>{log}</span>
+                    <span className={`${log.includes('✗') || log.includes('ERR') || log.includes('GAGAL') ? 'text-red-400 font-bold' : log.includes('✓') || log.includes('BERHASIL') || log.includes('SELESAI') ? 'text-green-400 font-bold' : 'text-white/75'}`}>{log}</span>
                   </div>
                 ))
               )}
@@ -326,7 +433,7 @@ export default function App() {
           <div className={`w-2.5 h-2.5 rounded-full ${devices.length > 0 ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : 'bg-white/10'}`} />
           <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{devices.length} Units Connected</span>
         </div>
-        <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.4.0</span>
+        <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.5.0</span>
       </footer>
     </div>
   );
