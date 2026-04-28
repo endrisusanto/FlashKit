@@ -28,3 +28,7 @@ bow_strings*.txt
 # OS files
 .DS_Store
 Thumbs.db
+
+# Legacy files
+extracted/
+BowWin_v21.01.2021.zip
