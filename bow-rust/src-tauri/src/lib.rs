@@ -6,16 +6,23 @@ use std::os::windows::process::CommandExt;
 
 #[tauri::command]
 fn get_resource_path(app: tauri::AppHandle, name: String) -> Result<String, String> {
-    let resource_path = app.path().resource_dir()
-        .map_err(|e| e.to_string())?
-        .join("assets")
-        .join(name);
+    let resolver = app.path();
+    let resource_dir = resolver.resource_dir().map_err(|e| e.to_string())?;
     
-    if resource_path.exists() {
-        Ok(resource_path.to_string_lossy().to_string())
-    } else {
-        Err(format!("Resource not found at: {:?}", resource_path))
+    // Coba beberapa kemungkinan path (Standard, Assets, dan _up_)
+    let paths = vec![
+        resource_dir.join("assets").join(&name),
+        resource_dir.join(&name),
+        resource_dir.parent().unwrap_or(&resource_dir).join("_up_").join("assets").join(&name),
+    ];
+
+    for path in paths {
+        if path.exists() {
+            return Ok(path.to_string_lossy().to_string());
+        }
     }
+    
+    Err(format!("Resource '{}' not found in any standard location", name))
 }
 fn get_exe_dir() -> PathBuf {
     std::env::current_exe()
@@ -160,8 +167,9 @@ fn send_at_command(port_name: String, command: String) -> Result<String, String>
     use std::io::{Read, Write};
     use std::time::Duration;
 
-    let mut port = serialport::new(&port_name, 9600)
-        .timeout(Duration::from_millis(2000))
+    // Tingkatkan Baud Rate ke 115200 dan Timeout ke 5 detik
+    let mut port = serialport::new(&port_name, 115200)
+        .timeout(Duration::from_secs(5))
         .open()
         .map_err(|e| format!("Failed to open port {}: {}", port_name, e))?;
 
@@ -169,13 +177,16 @@ fn send_at_command(port_name: String, command: String) -> Result<String, String>
     port.write_all(cmd.as_bytes())
         .map_err(|e| format!("Failed to write to port: {}", e))?;
 
+    // Tunggu sedikit agar device sempat memproses
+    std::thread::sleep(Duration::from_millis(500));
+
     let mut buffer: Vec<u8> = vec![0; 1024];
     match port.read(buffer.as_mut_slice()) {
         Ok(t) => {
             let response = String::from_utf8_lossy(&buffer[..t]).to_string();
             Ok(response)
         }
-        Err(e) => Err(format!("Failed to read from port: {}", e)),
+        Err(e) => Err(format!("AT Command Timeout: {}", e)),
     }
 }
 

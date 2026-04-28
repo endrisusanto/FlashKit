@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, Play, Wifi, Smartphone, Check, Zap, Terminal, ChevronDown, ChevronUp } from "lucide-react";
+import { RefreshCw, Play, Wifi, Smartphone, Check, Zap, Terminal, ChevronDown, ChevronUp, CheckCircle } from "lucide-react";
 
 export default function App() {
   const [devices, setDevices] = useState<string[]>([]);
@@ -129,6 +129,26 @@ export default function App() {
         appendLog(`[${dev}] ✓ SUCCESS`);
       } catch (e: any) {
         appendLog(`[${dev}] ✗ FAILED: ${e}`);
+      }
+    }
+    appendLog("──── Complete ────");
+    setLoading(false);
+  };
+
+  const setupPrecondition = async () => {
+    if (selectedDevices.length === 0) return;
+    setLoading(true);
+    setLogExpanded(true);
+    appendLog("──── Setup Precondition GBA Test ────");
+    for (const dev of selectedDevices) {
+      appendLog(`[${dev}] Applying GBA Preconditions...`);
+      try {
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system screen_off_timeout 600000"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "settings put system time_12_24 12"] }); await delay(200);
+        await invoke("run_adb", { args: ["-s", dev, "shell", "locksettings set-disabled true"] }); await delay(200);
+        appendLog(`[${dev}] ✓ GBA Settings Applied`);
+      } catch (e: any) {
+        appendLog(`[${dev}] ✗ ${e}`);
       }
     }
     appendLog("──── Complete ────");
@@ -287,7 +307,21 @@ export default function App() {
                   </div>
                   <span className="text-[14px] font-semibold">Skip Setup Wizard</span>
                   <span className="win-badge bg-[rgba(255,255,255,0.06)] text-[var(--win-text-tertiary)]">
-                    {selectedDevices.length} device(s)
+                    Full Bow Algorithm
+                  </span>
+                </button>
+
+                <button
+                  onClick={setupPrecondition}
+                  disabled={loading || selectedDevices.length === 0}
+                  className="win-action-card"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-[#6b21a8] flex items-center justify-center">
+                    <CheckCircle className="w-5 h-5 text-white" />
+                  </div>
+                  <span className="text-[14px] font-semibold">Setup GBA Test</span>
+                  <span className="win-badge bg-[rgba(255,255,255,0.06)] text-[var(--win-text-tertiary)]">
+                    Precondition
                   </span>
                 </button>
 
