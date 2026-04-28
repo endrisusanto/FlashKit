@@ -1,6 +1,30 @@
+# Node.js
 node_modules/
 dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# Tauri
 src-tauri/target/
-bow_strings*.txt
+src-tauri/gen/
+
+# Build artifacts
 *.rpm
 *.deb
+*.exe
+*.zip
+
+# Logs
+logs/
+*.log
+bow_strings*.txt
+
+# OS files
+.DS_Store
+Thumbs.db

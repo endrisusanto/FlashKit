@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    bow_rust_lib::run()
+    flashkit_lib::run()
 }

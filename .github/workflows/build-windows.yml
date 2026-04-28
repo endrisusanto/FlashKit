@@ -3,6 +3,9 @@ name: Build Windows EXE
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
+      - master
     tags:
       - 'v*'
 
@@ -32,7 +35,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "portable-build"
-          Copy-Item "bow-rust/src-tauri/target/release/bow-rust.exe" "portable-build/"
+          Copy-Item "bow-rust/src-tauri/target/release/FlashKit.exe" "portable-build/"
           Copy-Item "extracted/Bow/WifiUtil.apk" "portable-build/"
           Copy-Item "extracted/Bow/Data_Saver_Test-debug.apk" "portable-build/"
           Copy-Item "extracted/Bow/Data_Saver_Test-debug-androidTest.apk" "portable-build/"
@@ -41,11 +44,11 @@ jobs:
       - name: Upload portable EXE
         uses: actions/upload-artifact@v4
         with:
-          name: BowDeviceManager-Windows-Portable
+          name: FlashKit-Windows-Portable
           path: portable-build/
 
       - name: Upload NSIS Installer
         uses: actions/upload-artifact@v4
         with:
-          name: BowDeviceManager-Windows-Installer
+          name: FlashKit-Windows-Installer
           path: bow-rust/src-tauri/target/release/bundle/nsis/

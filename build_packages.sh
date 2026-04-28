@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "Building Bow Device Manager for Linux (DEB and RPM)"
+echo "Building FlashKit for Linux (DEB and RPM)"
 
 # Ensure we are in the tauri app directory
 cd "$(dirname "$0")/bow-rust" || exit
