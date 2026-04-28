@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, Play, Wifi, Smartphone, Check, Terminal, Settings, ChevronRight } from "lucide-react";
+import { RefreshCw, Play, Wifi, Smartphone, Check, Terminal, ChevronRight } from "lucide-react";
 
 export default function App() {
   const [devices, setDevices] = useState<string[]>([]);
@@ -74,7 +74,7 @@ export default function App() {
     }
     const runWithRetry = async (cmd: string) => {
       for (let i = 0; i < 2; i++) {
-        try { await invoke("send_at_command", { portName: portToUse, command: cmd }); return true; } 
+        try { await invoke("send_at_command", { portName: portToUse, command: cmd }); return true; }
         catch { await delay(1000); }
       }
       return false;
@@ -155,7 +155,7 @@ export default function App() {
         await run(["settings put global adb_enabled 1"]);
         await run(["settings put global verifier_verify_adb_installs 0"]);
         for (let i = 0; i < 3; i++) {
-          try { await invoke("run_adb", { args: ["-s", dev, "shell", "svc usb setFunctions mtp"] }); break; } 
+          try { await invoke("run_adb", { args: ["-s", dev, "shell", "svc usb setFunctions mtp"] }); break; }
           catch { await delay(1000); }
         }
         await run(["settings put system screen_off_timeout 600000"]);
@@ -174,7 +174,7 @@ export default function App() {
     if (active.length === 0 || !ssid) { appendLog("✗ Perangkat atau SSID kosong."); return; }
     if (!isSequence) setLoading(true);
     appendLog(`──── WiFi Sync: ${ssid} ────`);
-    
+
     let apk: string;
     try { apk = await invoke("get_resource_path", { name: "WifiUtil.apk" }); } catch (e) { appendLog(`ERR: ${e}`); if (!isSequence) setLoading(false); return; }
 
@@ -185,10 +185,10 @@ export default function App() {
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] });
         await delay(500);
 
-        const addCmd = password 
+        const addCmd = password
           ? `am instrument -e method addWpaPskNetwork -e ssid "${ssid}" -e psk "${password}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`
           : `am instrument -e method addOpenNetwork -e ssid "${ssid}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`;
-        
+
         const addResult: string = await invoke("run_adb", { args: ["-s", dev, "shell", addCmd] });
         let netId = "";
         const match = addResult.match(/result=(\d+)/);
@@ -201,7 +201,7 @@ export default function App() {
         }
 
         await invoke("run_adb", { args: ["-s", dev, "shell", "am instrument -e method saveConfiguration -w com.android.tradefed.utils.wifi/.WifiUtil"] });
-        
+
         // Hapus verifikasi WiFi seperti yang diminta
         appendLog(`[${dev}] ✓ WiFi SYNC SELESAI`);
       } catch (e: any) { appendLog(`[${dev}] ✗ GAGAL: ${e}`); }
@@ -214,7 +214,7 @@ export default function App() {
       appendLog("✗ Tidak ada aksi yang diaktifkan di Master Sequence.");
       return;
     }
-    
+
     setLoading(true);
     appendLog("==== MEMULAI MASTER SEQUENCE ====");
 
@@ -276,9 +276,9 @@ export default function App() {
               </div>
             ) : (
               devices.map(id => (
-                <div 
-                  key={id} 
-                  onClick={() => toggleDevice(id)} 
+                <div
+                  key={id}
+                  onClick={() => toggleDevice(id)}
                   className={`p-7 border transition-all cursor-pointer ${selectedDevices.includes(id) ? 'border-white shadow-[0_0_15px_rgba(255,255,255,0.25)]' : 'border-[#222] hover:border-white/10'}`}
                   style={{ borderRadius: '0px !important' }}
                 >
@@ -303,10 +303,10 @@ export default function App() {
 
         {/* Right: Dashboard */}
         <div className="flex-1 flex flex-col gap-8 min-w-0">
-          
+
           {/* WIFI CONFIG CARD */}
           <div className="p-8 bg-[#1a1a1a] border border-[#222]">
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-center mb-6">
               <div className="flex items-center gap-3">
                 <Wifi className="w-4 h-4 text-white/40" />
                 <span className="text-[11px] font-black uppercase tracking-widest text-white/40">Pengaturan WiFi</span>
@@ -321,12 +321,7 @@ export default function App() {
           {/* MASTER SEQUENCE CARD 1x4 */}
           <div className="p-8 bg-[#1a1a1a] border border-[#222] relative overflow-hidden">
             {/* Breadcrumb Header */}
-            <div className="flex items-center justify-between mb-8">
-              <div className="flex items-center gap-3">
-                <Settings className={`w-5 h-5 ${currentStep !== null ? 'text-blue-500 animate-spin-slow' : 'text-white'}`} />
-                <span className="text-[13px] font-black uppercase tracking-widest">Master Sequence</span>
-              </div>
-              
+            <div className="flex items-center justify-center mb-8">
               {/* Animated Breadcrumb Progress */}
               <div className="flex items-center gap-2">
                 <div className={`flex items-center gap-2 transition-all duration-500 ${!seqSkipWz ? 'hidden' : ''} ${currentStep === 1 ? 'opacity-100' : (currentStep && currentStep > 1 ? 'opacity-30' : 'opacity-10')}`}>
@@ -343,59 +338,61 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-6">
-              {/* Toggle Skip Wz */}
-              <div 
-                onClick={() => !loading && setSeqSkipWz(!seqSkipWz)}
-                className={`p-6 border transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqSkipWz ? 'border-blue-500 bg-blue-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}
-                style={{ borderRadius: '0px !important' }}
-              >
-                <div className={`w-5 h-5 border flex items-center justify-center transition-all ${seqSkipWz ? 'bg-blue-500 border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'border-white/20'}`} style={{ borderRadius: '0px !important' }}>
-                  {seqSkipWz && <Check className="w-3 h-3 text-white font-black" />}
+            <div className="flex flex-col gap-6">
+              <div className="grid grid-cols-3 gap-6">
+                {/* Toggle Skip Wz */}
+                <div
+                  onClick={() => !loading && setSeqSkipWz(!seqSkipWz)}
+                  className={`p-6 border transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqSkipWz ? 'border-blue-500 bg-blue-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}
+                  style={{ borderRadius: '0px !important' }}
+                >
+                  <div className={`w-5 h-5 border flex items-center justify-center transition-all ${seqSkipWz ? 'bg-blue-500 border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'border-white/20'}`} style={{ borderRadius: '0px !important' }}>
+                    {seqSkipWz && <Check className="w-3 h-3 text-white font-black" />}
+                  </div>
+                  <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqSkipWz ? 'text-blue-400' : 'text-white/40'}`}>Skip Wizard</span>
                 </div>
-                <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqSkipWz ? 'text-blue-400' : 'text-white/40'}`}>Skip Wizard</span>
-              </div>
 
-              {/* Toggle GBA */}
-              <div 
-                onClick={() => !loading && setSeqGba(!seqGba)}
-                className={`p-6 border transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqGba ? 'border-purple-500 bg-purple-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}
-                style={{ borderRadius: '0px !important' }}
-              >
-                <div className={`w-5 h-5 border flex items-center justify-center transition-all ${seqGba ? 'bg-purple-500 border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.5)]' : 'border-white/20'}`} style={{ borderRadius: '0px !important' }}>
-                  {seqGba && <Check className="w-3 h-3 text-white font-black" />}
+                {/* Toggle GBA */}
+                <div
+                  onClick={() => !loading && setSeqGba(!seqGba)}
+                  className={`p-6 border transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqGba ? 'border-purple-500 bg-purple-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}
+                  style={{ borderRadius: '0px !important' }}
+                >
+                  <div className={`w-5 h-5 border flex items-center justify-center transition-all ${seqGba ? 'bg-purple-500 border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.5)]' : 'border-white/20'}`} style={{ borderRadius: '0px !important' }}>
+                    {seqGba && <Check className="w-3 h-3 text-white font-black" />}
+                  </div>
+                  <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqGba ? 'text-purple-400' : 'text-white/40'}`}>Setup GBA</span>
                 </div>
-                <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqGba ? 'text-purple-400' : 'text-white/40'}`}>Setup GBA</span>
-              </div>
 
-              {/* Toggle WiFi */}
-              <div 
-                onClick={() => !loading && setSeqWifi(!seqWifi)}
-                className={`p-6 border transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqWifi ? 'border-green-500 bg-green-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}
-                style={{ borderRadius: '0px !important' }}
-              >
-                <div className={`w-5 h-5 border flex items-center justify-center transition-all ${seqWifi ? 'bg-green-500 border-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'border-white/20'}`} style={{ borderRadius: '0px !important' }}>
-                  {seqWifi && <Check className="w-3 h-3 text-white font-black" />}
+                {/* Toggle WiFi */}
+                <div
+                  onClick={() => !loading && setSeqWifi(!seqWifi)}
+                  className={`p-6 border transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqWifi ? 'border-green-500 bg-green-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}
+                  style={{ borderRadius: '0px !important' }}
+                >
+                  <div className={`w-5 h-5 border flex items-center justify-center transition-all ${seqWifi ? 'bg-green-500 border-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'border-white/20'}`} style={{ borderRadius: '0px !important' }}>
+                    {seqWifi && <Check className="w-3 h-3 text-white font-black" />}
+                  </div>
+                  <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqWifi ? 'text-green-400' : 'text-white/40'}`}>WiFi Sync</span>
                 </div>
-                <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqWifi ? 'text-green-400' : 'text-white/40'}`}>WiFi Sync</span>
               </div>
 
               {/* Execute Button */}
-              <button 
+              <button
                 onClick={runMasterSequence}
                 disabled={loading || (!seqSkipWz && !seqGba && !seqWifi)}
-                className={`transition-all font-black uppercase tracking-widest text-[14px] flex flex-col items-center justify-center gap-3 border-2 ${loading ? 'bg-[#111] border-[#333] text-white/40 cursor-not-allowed' : 'bg-white text-black border-white hover:bg-gray-200 disabled:opacity-30'}`}
+                className={`w-full py-5 transition-all font-black uppercase tracking-widest text-[14px] flex items-center justify-center gap-3 border-2 ${loading ? 'bg-[#111] border-[#333] text-white/40 cursor-not-allowed' : 'bg-white text-black border-white hover:bg-gray-200 disabled:opacity-30'}`}
                 style={{ borderRadius: '0px !important' }}
               >
                 {loading && currentStep !== null ? (
-                   <RefreshCw className="w-7 h-7 animate-spin" />
+                  <RefreshCw className="w-6 h-6 animate-spin" />
                 ) : (
-                   <Play className="w-7 h-7" />
+                  <Play className="w-6 h-6" />
                 )}
-                <span>{loading && currentStep !== null ? 'Memproses...' : 'Jalankan'}</span>
+                <span>{loading && currentStep !== null ? 'Memproses...' : 'Jalankan Automasi'}</span>
               </button>
             </div>
-            
+
             {/* Loading Progress Bar at bottom of card */}
             {loading && currentStep !== null && (
               <div className="absolute bottom-0 left-0 h-1 bg-blue-500 w-full animate-pulse"></div>
