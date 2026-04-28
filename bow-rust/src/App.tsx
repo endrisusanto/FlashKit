@@ -160,27 +160,42 @@ export default function App() {
     const active = selectedDevices.length > 0 ? selectedDevices : devices;
     if (active.length === 0 || !ssid) { appendLog("✗ Perangkat atau SSID kosong."); return; }
     setLoading(true);
-    appendLog(`──── WiFi Sync: ${ssid} ────`);
+    appendLog(`──── WiFi Sync: ${ssid} (WifiUtil) ────`);
     
+    let apk: string;
+    try { apk = await invoke("get_resource_path", { name: "WifiUtil.apk" }); } catch (e) { appendLog(`ERR: ${e}`); setLoading(false); return; }
+
     await Promise.all(active.map(async (dev) => {
       try {
-        appendLog(`[${dev}] Menghubungkan ke ${ssid}...`);
+        appendLog(`[${dev}] Menyiapkan WifiUtil...`);
         await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] });
+        await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] });
         await delay(500);
 
-        // Metode Native cmd wifi (mendukung SSID berspasi)
-        const sec = password ? "wpa2" : "open";
-        const passArg = password ? password : "";
-        const wifiCmd = `cmd wifi connect-network "\\"${ssid}\\"" ${sec} ${passArg}`;
+        // Menambah jaringan dan mengambil ID
+        const addCmd = password 
+          ? `am instrument -e method addWpaPskNetwork -e ssid "${ssid}" -e psk "${password}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`
+          : `am instrument -e method addOpenNetwork -e ssid "${ssid}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`;
         
-        await invoke("run_adb", { args: ["-s", dev, "shell", wifiCmd] });
+        const addResult: string = await invoke("run_adb", { args: ["-s", dev, "shell", addCmd] });
+        let netId = "";
+        const match = addResult.match(/result=(\d+)/);
+        if (match && match[1]) { netId = match[1]; }
+
+        if (netId) {
+          await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method associateNetwork -e id ${netId} -w com.android.tradefed.utils.wifi/.WifiUtil`] });
+        } else {
+          await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method associateNetwork -e ssid "${ssid}" -w com.android.tradefed.utils.wifi/.WifiUtil`] });
+        }
+
+        await invoke("run_adb", { args: ["-s", dev, "shell", "am instrument -e method saveConfiguration -w com.android.tradefed.utils.wifi/.WifiUtil"] });
         await delay(3000); 
         
         const status: string = await invoke("run_adb", { args: ["-s", dev, "shell", "dumpsys wifi | grep mNetworkInfo"] });
         if (status.includes("CONNECTED/CONNECTED")) {
           appendLog(`[${dev}] ✓ WiFi TERHUBUNG`);
         } else {
-          appendLog(`[${dev}] ⚠ Perintah terkirim, periksa perangkat`);
+          appendLog(`[${dev}] ⚠ Periksa koneksi manual pada perangkat`);
         }
       } catch (e: any) { appendLog(`[${dev}] ✗ GAGAL: ${e}`); }
     }));
@@ -191,7 +206,7 @@ export default function App() {
   const selectAll = () => setSelectedDevices(selectedDevices.length === devices.length ? [] : [...devices]);
 
   return (
-    <div className="flex flex-col h-screen bg-[#0f0f0f] text-white overflow-hidden rounded-xl border border-[#222]">
+    <div className="flex flex-col h-screen bg-[#0f0f0f] text-white overflow-hidden border border-[#222]">
       {/* ── NAVBAR (Centered Title) ── */}
       <header className="flex items-center px-8 h-14 bg-[#151515] border-b border-[#222] shrink-0 relative" data-tauri-drag-region>
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -202,34 +217,39 @@ export default function App() {
 
       <main className="flex-1 flex min-h-0 p-8 gap-8 overflow-hidden">
         {/* Left: Device Pool (Responsive Width) */}
-        <div className="w-1/3 min-w-[100px] max-w-[500px] flex flex-col gap-6 shrink-0">
+        <div className="w-1/3 min-w-[350px] max-w-[500px] flex flex-col gap-6 shrink-0">
           <div className="flex flex-col gap-3">
             <h3 className="text-[11px] font-black text-white/40 uppercase tracking-widest text-center">Daftar Perangkat ({devices.length})</h3>
             <div className="flex items-center justify-center gap-3 px-2">
-              <button onClick={refreshDevices} className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all">
+              <button onClick={refreshDevices} className="p-2.5 bg-white/5 border border-white/10 hover:bg-white/10 transition-all">
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-blue-500' : 'text-white/60'}`} />
               </button>
-              <button onClick={selectAll} className="px-6 py-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase hover:bg-white/10 transition-all tracking-widest">
+              <button onClick={selectAll} className="px-6 py-2 bg-white/5 border border-white/10 text-[10px] font-black uppercase hover:bg-white/10 transition-all tracking-widest">
                 {selectedDevices.length === devices.length ? "Batal Semua" : "Pilih Semua"}
               </button>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar py-12">
+          <div className="flex-1 overflow-y-auto space-y-12 pr-2 custom-scrollbar py-32">
             {devices.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center opacity-10 gap-4 border-2 border-dashed border-white/10 rounded-3xl">
+              <div className="h-full flex flex-col items-center justify-center opacity-10 gap-4 border-2 border-dashed border-white/10">
                 <Smartphone className="w-12 h-12" />
                 <span className="text-[10px] font-black uppercase tracking-widest">Menunggu Koneksi</span>
               </div>
             ) : (
               devices.map(id => (
-                <div key={id} onClick={() => toggleDevice(id)} className={`p-7 rounded-2xl border transition-all cursor-pointer ${selectedDevices.includes(id) ? 'bg-blue-600/15 border-blue-500 shadow-lg' : 'bg-[#1a1a1a] border-[#222] hover:border-white/20'}`}>
+                <div 
+                  key={id} 
+                  onClick={() => toggleDevice(id)} 
+                  className={`p-7 border transition-all cursor-pointer ${selectedDevices.includes(id) ? 'border-white shadow-[0_0_15px_rgba(255,255,255,0.25)]' : 'border-[#222] hover:border-white/10'}`}
+                  style={{ borderRadius: '0px !important' }}
+                >
                   <div className="flex items-center justify-between mb-5">
                     <div className="flex flex-col min-w-0">
                       <span className="text-[17px] font-bold truncate pr-4 leading-tight">{deviceDetails[id]?.['ro.product.model'] || id}</span>
                       <span className="text-[11px] text-white/25 font-mono tracking-tight">SN: {id}</span>
                     </div>
-                    <div className={`w-6 h-6 rounded-lg border flex items-center justify-center transition-all ${selectedDevices.includes(id) ? 'bg-blue-500 border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'border-white/10'}`}>
-                      {selectedDevices.includes(id) && <Check className="w-3.5 h-3.5 text-white font-black" />}
+                    <div className={`w-6 h-6 border flex items-center justify-center transition-all ${selectedDevices.includes(id) ? 'bg-white border-white shadow-[0_0_10px_rgba(255,255,255,0.4)]' : 'border-white/10'}`} style={{ borderRadius: '0px !important' }}>
+                      {selectedDevices.includes(id) && <Check className="w-3.5 h-3.5 text-black font-black" />}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4 pt-5 border-t border-white/5">
@@ -245,29 +265,29 @@ export default function App() {
         {/* Right: Dashboard */}
         <div className="flex-1 flex flex-col gap-8 min-w-0">
           {/* WiFi Card */}
-          <div className="p-8 rounded-[32px] bg-[#1a1a1a] border border-[#222]">
+          <div className="p-8 bg-[#1a1a1a] border border-[#222]">
             <div className="flex items-center justify-center gap-3 mb-8">
               <Wifi className="w-5 h-5 text-green-500" />
               <span className="text-[12px] font-black uppercase tracking-widest text-center">Pengaturan WiFi</span>
             </div>
             <div className="grid grid-cols-2 gap-8">
-              <input value={ssid} onChange={e => setSsid(e.target.value)} className="win-input px-6 py-4 rounded-2xl" placeholder="Nama WiFi (SSID)" />
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="win-input px-6 py-4 rounded-2xl" placeholder="Kata Sandi" />
+              <input value={ssid} onChange={e => setSsid(e.target.value)} className="win-input px-6 py-4" placeholder="Nama WiFi (SSID)" style={{ borderRadius: '0px !important' }} />
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="win-input px-6 py-4" placeholder="Kata Sandi" style={{ borderRadius: '0px !important' }} />
             </div>
           </div>
 
           {/* Action Grid */}
-          <div className="p-8 rounded-[32px] bg-[#1a1a1a] border border-[#222]">
+          <div className="p-8 bg-[#1a1a1a] border border-[#222]">
             <div className="grid grid-cols-3 gap-8">
-              <button onClick={skipWz} disabled={loading} className="win-action-card bg-blue-600 hover:bg-blue-500 shadow-xl shadow-blue-900/10 h-40">
+              <button onClick={skipWz} disabled={loading} className="win-action-card bg-blue-600 hover:bg-blue-500 shadow-xl shadow-blue-900/10 h-40" style={{ borderRadius: '0px !important' }}>
                 <Play className="w-10 h-10 text-white" />
                 <span className="text-[13px] font-black uppercase tracking-tight">Skip Wizard</span>
               </button>
-              <button onClick={setupPrecondition} disabled={loading} className="win-action-card bg-purple-600 hover:bg-purple-500 shadow-xl shadow-purple-900/10 h-40">
+              <button onClick={setupPrecondition} disabled={loading} className="win-action-card bg-purple-600 hover:bg-purple-500 shadow-xl shadow-purple-900/10 h-40" style={{ borderRadius: '0px !important' }}>
                 <CheckCircle className="w-10 h-10 text-white" />
                 <span className="text-[13px] font-black uppercase tracking-tight">Setup GBA</span>
               </button>
-              <button onClick={connectWifi} disabled={loading} className="win-action-card bg-green-600 hover:bg-green-500 shadow-xl shadow-green-900/10 h-40">
+              <button onClick={connectWifi} disabled={loading} className="win-action-card bg-green-600 hover:bg-green-500 shadow-xl shadow-green-900/10 h-40" style={{ borderRadius: '0px !important' }}>
                 <Wifi className="w-10 h-10 text-white" />
                 <span className="text-[13px] font-black uppercase tracking-tight">WiFi Sync</span>
               </button>
@@ -275,20 +295,20 @@ export default function App() {
           </div>
 
           {/* System Log */}
-          <div className="flex-1 bg-black rounded-[32px] border border-[#222] flex flex-col min-h-0 overflow-hidden shadow-2xl">
+          <div className="flex-1 bg-black border border-[#222] flex flex-col min-h-0 overflow-hidden shadow-2xl">
             <div className="flex items-center justify-between px-8 h-14 bg-white/5 border-b border-[#222]">
               <div className="flex-1 flex items-center justify-center gap-3">
                 <Terminal className="w-4 h-4 text-blue-500" />
                 <span className="text-[11px] font-black uppercase tracking-widest">Log Sistem</span>
               </div>
-              <button onClick={() => setLogs([])} className="text-[10px] font-black text-white/20 hover:text-white px-4 py-1.5 bg-white/5 rounded-xl transition-all">CLEAR</button>
+              <button onClick={() => setLogs([])} className="text-[10px] font-black text-white/20 hover:text-white px-4 py-1.5 bg-white/5 transition-all">CLEAR</button>
             </div>
             <div className="flex-1 overflow-y-auto p-8 font-mono text-[13px] select-text leading-relaxed custom-scrollbar">
               {logs.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-white/5 uppercase tracking-[0.5em] font-black italic">Ready</div>
               ) : (
                 logs.map((log, i) => (
-                  <div key={i} className="mb-3 border-l-2 border-white/5 pl-5 hover:border-blue-500 transition-all rounded-r-lg py-1 hover:bg-white/[0.02]">
+                  <div key={i} className="mb-3 border-l-2 border-white/5 pl-5 hover:border-blue-500 transition-all py-1 hover:bg-white/[0.02]">
                     <span className="text-white/20 mr-5 font-normal">[{new Date().toLocaleTimeString()}]</span>
                     <span className={`${log.includes('✗') || log.includes('ERR') || log.includes('GAGAL') ? 'text-red-400 font-bold' : log.includes('✓') || log.includes('BERHASIL') ? 'text-green-400 font-bold' : 'text-white/75'}`}>{log}</span>
                   </div>
@@ -305,7 +325,7 @@ export default function App() {
           <div className={`w-2.5 h-2.5 rounded-full ${devices.length > 0 ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : 'bg-white/10'}`} />
           <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{devices.length} Units Connected</span>
         </div>
-        <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.3.4</span>
+        <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.3.8</span>
       </footer>
     </div>
   );
