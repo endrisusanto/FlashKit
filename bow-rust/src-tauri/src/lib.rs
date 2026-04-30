@@ -12,15 +12,22 @@ fn get_resource_path(app: tauri::AppHandle, name: String) -> Result<String, Stri
     
     let mut paths = vec![];
     
-    // 1. Cek folder _up_/assets (Lokasi instalasi NSIS)
-    paths.push(exe_dir.join("_up_").join("assets").join(&name));
-    
-    // 2. Cek folder assets (Lokasi Portable/Standard)
-    paths.push(exe_dir.join("assets").join(&name));
-    paths.push(resource_dir.join("assets").join(&name));
-    
-    // 3. Cek folder resource_dir langsung
+    // 1. Cek folder resources (Lokasi Standard Tauri)
     paths.push(resource_dir.join(&name));
+    paths.push(resource_dir.join("assets").join(&name));
+    paths.push(resource_dir.join("_up_").join("assets").join(&name));
+
+    // 2. Jalur Spesifik Linux (Instalasi Sistem)
+    #[cfg(target_os = "linux")]
+    {
+        paths.push(PathBuf::from("/usr/lib/flashkit/resources").join(&name));
+        paths.push(PathBuf::from("/usr/lib/flashkit/resources/assets").join(&name));
+        paths.push(PathBuf::from("/usr/share/flashkit/resources").join(&name));
+    }
+    
+    // 3. Cek folder exe_dir (Lokasi Portable)
+    paths.push(exe_dir.join("assets").join(&name));
+    paths.push(exe_dir.join("_up_").join("assets").join(&name));
 
     for path in paths {
         if path.exists() {
@@ -28,7 +35,7 @@ fn get_resource_path(app: tauri::AppHandle, name: String) -> Result<String, Stri
         }
     }
     
-    Err(format!("Resource '{}' not found. Tried: {:?}", name, exe_dir))
+    Err(format!("Resource '{}' not found. Jalur resource_dir: {:?}, exe_dir: {:?}", name, resource_dir, exe_dir))
 }
 
 #[tauri::command]

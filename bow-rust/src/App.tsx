@@ -12,11 +12,9 @@ export default function App() {
   const [ssid, setSsid] = useState("RTT / IEEE 802.11");
   const [password, setPassword] = useState("1234qwer");
 
-  // Modal State
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [failedDevice, setFailedDevice] = useState<string | null>(null);
 
-  // Master Sequence States
   const [seqSkipWz, setSeqSkipWz] = useState(localStorage.getItem('seqSkipWz') !== 'false');
   const [seqGba, setSeqGba] = useState(localStorage.getItem('seqGba') !== 'false');
   const [seqWifi, setSeqWifi] = useState(localStorage.getItem('seqWifi') !== 'false');
@@ -35,6 +33,28 @@ export default function App() {
   }, [seqSkipWz, seqGba, seqWifi]);
 
   const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+  // Fungsi helper untuk menjalankan ADB dengan Smart Retry & AT Exploit Recovery
+  const runAdbWithRetry = async (dev: string, args: string[], maxRetries = 2) => {
+    let lastError = "";
+    for (let i = 0; i <= maxRetries; i++) {
+      try {
+        return await invoke("run_adb", { args: ["-s", dev, ...args] });
+      } catch (e: any) {
+        lastError = e.toString();
+        if (lastError.toLowerCase().includes("device not found") || lastError.toLowerCase().includes("closed")) {
+          if (i < maxRetries) {
+            appendLog(`[${dev}] ⚠ Koneksi hilang, mencoba pemulihan AT Exploit (Attempt ${i+1}/${maxRetries})...`);
+            await sendAT(true); // Coba wake up via AT
+            await delay(2000);
+            continue;
+          }
+        }
+        throw e;
+      }
+    }
+    throw new Error(lastError);
+  };
 
   const refreshDevices = async () => {
     setLoading(true);
@@ -61,7 +81,6 @@ export default function App() {
           if (!info || Object.keys(info).length === 0) throw new Error("Data Kosong");
           details[id] = info;
         } catch (e) { 
-          console.error(`Gagal ambil data ${id}:`, e);
           hasFail = true;
           setFailedDevice(id);
         }
@@ -73,7 +92,6 @@ export default function App() {
       
       if (hasFail) {
         setShowErrorModal(true);
-        appendLog("⚠ PERINGATAN: Beberapa perangkat gagal memberikan data prop.");
       }
     } catch (e: any) { appendLog(`ERROR: ${e}`); }
     setLoading(false);
@@ -128,8 +146,8 @@ export default function App() {
     await Promise.all(active.map(async (dev) => {
       appendLog(`[${dev}] Memproses Skip Wizard...`);
       try {
-        const run = async (args: string[]) => { await invoke("run_adb", { args: ["-s", dev, "shell", ...args] }); await delay(100); };
-        await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apkLang] });
+        const run = async (args: string[]) => { await runAdbWithRetry(dev, ["shell", ...args]); await delay(100); };
+        await runAdbWithRetry(dev, ["install", "-r", "-g", "--bypass-low-target-sdk-block", apkLang]);
         await run(["am start -n net.sanapeli.adbchangelanguage/.AdbChangeLanguage --es language en --es country US"]);
         await delay(800);
         await run(["settings put global system_locales en-US"]);
@@ -142,14 +160,14 @@ export default function App() {
         await run(["settings put system screen_off_timeout 600000"]);
         await run(["settings put system time_12_24 12"]);
         await run(["locksettings set-disabled true"]);
-        await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apkData] });
-        await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apkTest] });
-        await invoke("run_adb", { args: ["-s", dev, "shell", "am instrument -w -m -e debug false -e class 'com.example.DataSaver.ExampleInstrumentedTest' com.example.DataSaver.test/androidx.test.runner.AndroidJUnitRunner"] });
+        await runAdbWithRetry(dev, ["install", "-r", "-g", "--bypass-low-target-sdk-block", apkData]);
+        await runAdbWithRetry(dev, ["install", "-r", "-g", "--bypass-low-target-sdk-block", apkTest]);
+        await runAdbWithRetry(dev, ["shell", "am instrument -w -m -e debug false -e class 'com.example.DataSaver.ExampleInstrumentedTest' com.example.DataSaver.test/androidx.test.runner.AndroidJUnitRunner"]);
         await delay(500);
         await run(["pm disable-user com.sec.android.app.SecSetupWizard"]);
         await run(["pm disable-user com.google.android.setupwizard"]);
-        await invoke("run_adb", { args: ["-s", dev, "uninstall", "com.example.DataSaver"] });
-        await invoke("run_adb", { args: ["-s", dev, "uninstall", "com.example.DataSaver.test"] });
+        await runAdbWithRetry(dev, ["uninstall", "com.example.DataSaver"]);
+        await runAdbWithRetry(dev, ["uninstall", "com.example.DataSaver.test"]);
         await run(["pm uninstall net.sanapeli.adbchangelanguage"]);
         await run(["svc wifi enable"]);
         await run(["settings put global wifi_on 1"]);
@@ -167,12 +185,12 @@ export default function App() {
     appendLog("──── Setup Precondition ────");
     await Promise.all(active.map(async (dev) => {
       try {
-        const run = async (args: string[]) => { await invoke("run_adb", { args: ["-s", dev, "shell", ...args] }); await delay(100); };
+        const run = async (args: string[]) => { await runAdbWithRetry(dev, ["shell", ...args]); await delay(100); };
         await run(["settings put global development_settings_enabled 1"]);
         await run(["settings put global adb_enabled 1"]);
         await run(["settings put global verifier_verify_adb_installs 0"]);
         for (let i = 0; i < 3; i++) {
-          try { await invoke("run_adb", { args: ["-s", dev, "shell", "svc usb setFunctions mtp"] }); break; } 
+          try { await runAdbWithRetry(dev, ["shell", "svc usb setFunctions mtp"]); break; } 
           catch { await delay(1000); }
         }
         await run(["settings put system screen_off_timeout 600000"]);
@@ -198,26 +216,26 @@ export default function App() {
     await Promise.all(active.map(async (dev) => {
       try {
         appendLog(`[${dev}] Mengirim profil WiFi...`);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] });
-        await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] });
+        await runAdbWithRetry(dev, ["shell", "svc wifi enable"]);
+        await runAdbWithRetry(dev, ["install", "-r", "-g", "--bypass-low-target-sdk-block", apk]);
         await delay(500);
 
         const addCmd = password 
           ? `am instrument -e method addWpaPskNetwork -e ssid "${ssid}" -e psk "${password}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`
           : `am instrument -e method addOpenNetwork -e ssid "${ssid}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`;
         
-        const addResult: string = await invoke("run_adb", { args: ["-s", dev, "shell", addCmd] });
+        const addResult: string = await runAdbWithRetry(dev, ["shell", addCmd]);
         let netId = "";
         const match = addResult.match(/result=(\d+)/);
         if (match && match[1]) { netId = match[1]; }
 
         if (netId) {
-          await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method associateNetwork -e id ${netId} -w com.android.tradefed.utils.wifi/.WifiUtil`] });
+          await runAdbWithRetry(dev, ["shell", `am instrument -e method associateNetwork -e id ${netId} -w com.android.tradefed.utils.wifi/.WifiUtil`]);
         } else {
-          await invoke("run_adb", { args: ["-s", dev, "shell", `am instrument -e method associateNetwork -e ssid "${ssid}" -w com.android.tradefed.utils.wifi/.WifiUtil`] });
+          await runAdbWithRetry(dev, ["shell", `am instrument -e method associateNetwork -e ssid "${ssid}" -w com.android.tradefed.utils.wifi/.WifiUtil`]);
         }
 
-        await invoke("run_adb", { args: ["-s", dev, "shell", "am instrument -e method saveConfiguration -w com.android.tradefed.utils.wifi/.WifiUtil"] });
+        await runAdbWithRetry(dev, ["shell", "am instrument -e method saveConfiguration -w com.android.tradefed.utils.wifi/.WifiUtil"]);
         appendLog(`[${dev}] ✓ WiFi SYNC SELESAI`);
       } catch (e: any) { appendLog(`[${dev}] ✗ GAGAL: ${e}`); }
     }));
@@ -236,7 +254,7 @@ export default function App() {
     if (seqSkipWz) {
       setCurrentStep(1);
       await skipWz(true);
-      await delay(2000);
+      await delay(3000); // Beri jeda lebih lama setelah Skip Wizard agar ADB stabil
     }
 
     if (seqGba) {
@@ -262,7 +280,6 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-[#0f0f0f] text-white overflow-hidden border border-[#222] select-none">
       
-      {/* ── ERROR MODAL (Industrial Style) ── */}
       {showErrorModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-8">
           <div className="w-full max-w-md bg-[#1a1a1a] border border-red-500/50 shadow-[0_0_50px_rgba(239,68,68,0.2)] relative">
@@ -298,7 +315,6 @@ export default function App() {
         </div>
       )}
 
-      {/* ── NAVBAR ── */}
       <header className="flex items-center px-8 h-14 bg-[#151515] border-b border-[#222] shrink-0 relative" data-tauri-drag-region>
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span className="text-[16px] font-black tracking-[0.2em] uppercase text-white/90">FlashKit</span>
@@ -307,7 +323,6 @@ export default function App() {
       </header>
 
       <main className="flex-1 flex min-h-0 p-8 gap-8 overflow-hidden">
-        {/* Left: Device Pool */}
         <div className="w-1/3 min-w-[350px] max-w-[500px] flex flex-col gap-6 shrink-0">
           <div className="flex flex-col gap-3">
             <h3 className="text-[11px] font-black text-white/40 uppercase tracking-widest text-center">Daftar Perangkat ({devices.length})</h3>
@@ -352,10 +367,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Right: Dashboard */}
         <div className="flex-1 flex flex-col gap-8 min-w-0">
-          
-          {/* WIFI CONFIG CARD */}
           <div className="p-8 bg-[#1a1a1a] border border-[#222]">
             <div className="flex items-center justify-center mb-6">
               <div className="flex items-center gap-3">
@@ -369,7 +381,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* MASTER SEQUENCE CARD */}
           <div className="p-8 bg-[#1a1a1a] border border-[#222] relative overflow-hidden">
             <div className="flex items-center justify-center mb-8">
               <div className="flex items-center gap-2">
@@ -416,7 +427,6 @@ export default function App() {
             {loading && currentStep !== null && <div className="absolute bottom-0 left-0 h-1 bg-blue-500 w-full animate-pulse"></div>}
           </div>
 
-          {/* System Log */}
           <div className="flex-1 bg-black border border-[#222] flex flex-col min-h-0 overflow-hidden shadow-2xl">
             <div className="flex items-center justify-between px-8 h-14 bg-white/5 border-b border-[#222]">
               <div className="flex-1 flex items-center justify-center gap-3">
