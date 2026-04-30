@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw, Play, Wifi, Smartphone, Check, Terminal, ChevronRight } from "lucide-react";
+import { RefreshCw, Play, Wifi, Smartphone, Check, Terminal, ChevronRight, AlertTriangle, X } from "lucide-react";
 
 export default function App() {
   const [devices, setDevices] = useState<string[]>([]);
@@ -11,6 +11,10 @@ export default function App() {
   const logEndRef = useRef<HTMLDivElement>(null);
   const [ssid, setSsid] = useState("RTT / IEEE 802.11");
   const [password, setPassword] = useState("1234qwer");
+
+  // Modal State
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [failedDevice, setFailedDevice] = useState<string | null>(null);
 
   // Master Sequence States
   const [seqSkipWz, setSeqSkipWz] = useState(localStorage.getItem('seqSkipWz') !== 'false');
@@ -49,15 +53,28 @@ export default function App() {
       const list: string[] = await invoke("get_devices");
       setDevices(list);
       const details: Record<string, any> = {};
+      let hasFail = false;
+
       await Promise.all(list.map(async (id) => {
         try {
           const info: any = await invoke("get_device_info", { serial: id });
+          if (!info || Object.keys(info).length === 0) throw new Error("Data Kosong");
           details[id] = info;
-        } catch (e) { console.error(e); }
+        } catch (e) { 
+          console.error(`Gagal ambil data ${id}:`, e);
+          hasFail = true;
+          setFailedDevice(id);
+        }
       }));
+
       setDeviceDetails(details);
       if (selectedDevices.length === 0) setSelectedDevices(list);
       appendLog(`Ditemukan ${list.length} perangkat`);
+      
+      if (hasFail) {
+        setShowErrorModal(true);
+        appendLog("⚠ PERINGATAN: Beberapa perangkat gagal memberikan data prop.");
+      }
     } catch (e: any) { appendLog(`ERROR: ${e}`); }
     setLoading(false);
   };
@@ -74,7 +91,7 @@ export default function App() {
     }
     const runWithRetry = async (cmd: string) => {
       for (let i = 0; i < 2; i++) {
-        try { await invoke("send_at_command", { portName: portToUse, command: cmd }); return true; }
+        try { await invoke("send_at_command", { portName: portToUse, command: cmd }); return true; } 
         catch { await delay(1000); }
       }
       return false;
@@ -155,7 +172,7 @@ export default function App() {
         await run(["settings put global adb_enabled 1"]);
         await run(["settings put global verifier_verify_adb_installs 0"]);
         for (let i = 0; i < 3; i++) {
-          try { await invoke("run_adb", { args: ["-s", dev, "shell", "svc usb setFunctions mtp"] }); break; }
+          try { await invoke("run_adb", { args: ["-s", dev, "shell", "svc usb setFunctions mtp"] }); break; } 
           catch { await delay(1000); }
         }
         await run(["settings put system screen_off_timeout 600000"]);
@@ -174,7 +191,7 @@ export default function App() {
     if (active.length === 0 || !ssid) { appendLog("✗ Perangkat atau SSID kosong."); return; }
     if (!isSequence) setLoading(true);
     appendLog(`──── WiFi Sync: ${ssid} ────`);
-
+    
     let apk: string;
     try { apk = await invoke("get_resource_path", { name: "WifiUtil.apk" }); } catch (e) { appendLog(`ERR: ${e}`); if (!isSequence) setLoading(false); return; }
 
@@ -185,10 +202,10 @@ export default function App() {
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] });
         await delay(500);
 
-        const addCmd = password
+        const addCmd = password 
           ? `am instrument -e method addWpaPskNetwork -e ssid "${ssid}" -e psk "${password}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`
           : `am instrument -e method addOpenNetwork -e ssid "${ssid}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`;
-
+        
         const addResult: string = await invoke("run_adb", { args: ["-s", dev, "shell", addCmd] });
         let netId = "";
         const match = addResult.match(/result=(\d+)/);
@@ -201,8 +218,6 @@ export default function App() {
         }
 
         await invoke("run_adb", { args: ["-s", dev, "shell", "am instrument -e method saveConfiguration -w com.android.tradefed.utils.wifi/.WifiUtil"] });
-
-        // Hapus verifikasi WiFi seperti yang diminta
         appendLog(`[${dev}] ✓ WiFi SYNC SELESAI`);
       } catch (e: any) { appendLog(`[${dev}] ✗ GAGAL: ${e}`); }
     }));
@@ -214,7 +229,7 @@ export default function App() {
       appendLog("✗ Tidak ada aksi yang diaktifkan di Master Sequence.");
       return;
     }
-
+    
     setLoading(true);
     appendLog("==== MEMULAI MASTER SEQUENCE ====");
 
@@ -245,8 +260,45 @@ export default function App() {
   const selectAll = () => setSelectedDevices(selectedDevices.length === devices.length ? [] : [...devices]);
 
   return (
-    <div className="flex flex-col h-screen bg-[#0f0f0f] text-white overflow-hidden border border-[#222]">
-      {/* ── NAVBAR (Centered Title) ── */}
+    <div className="flex flex-col h-screen bg-[#0f0f0f] text-white overflow-hidden border border-[#222] select-none">
+      
+      {/* ── ERROR MODAL (Industrial Style) ── */}
+      {showErrorModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-8">
+          <div className="w-full max-w-md bg-[#1a1a1a] border border-red-500/50 shadow-[0_0_50px_rgba(239,68,68,0.2)] relative">
+            <div className="flex items-center justify-between p-6 border-b border-white/5 bg-red-500/5">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="w-5 h-5 text-red-500" />
+                <span className="text-[12px] font-black uppercase tracking-widest text-red-500">Device Data Error</span>
+              </div>
+              <button onClick={() => setShowErrorModal(false)} className="p-1 hover:bg-white/5 transition-all">
+                <X className="w-4 h-4 text-white/40" />
+              </button>
+            </div>
+            <div className="p-8 space-y-6">
+              <p className="text-[14px] leading-relaxed text-white/80">
+                Gagal mengambil data properti dari perangkat <span className="font-mono text-red-400">[{failedDevice}]</span>.
+              </p>
+              <div className="bg-black/50 border-l-2 border-red-500 p-5 space-y-3">
+                <p className="text-[11px] font-black uppercase tracking-widest text-white/40">Kemungkinan Penyebab:</p>
+                <ul className="text-[12px] space-y-2 list-disc list-inside text-white/60">
+                  <li>Mode <span className="text-white font-bold">Skip_SUW</span> belum diaktifkan</li>
+                  <li>Mode <span className="text-white font-bold">USB Debugging</span> belum terinstall/aktif</li>
+                  <li>Perangkat belum di-awake melalui AT Exploit</li>
+                </ul>
+              </div>
+              <button 
+                onClick={() => { setShowErrorModal(false); sendAT(); }}
+                className="w-full py-4 bg-red-500 hover:bg-red-400 text-white font-black uppercase tracking-widest text-[11px] transition-all"
+              >
+                Jalankan AT Exploit Sekarang
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── NAVBAR ── */}
       <header className="flex items-center px-8 h-14 bg-[#151515] border-b border-[#222] shrink-0 relative" data-tauri-drag-region>
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span className="text-[16px] font-black tracking-[0.2em] uppercase text-white/90">FlashKit</span>
@@ -255,7 +307,7 @@ export default function App() {
       </header>
 
       <main className="flex-1 flex min-h-0 p-8 gap-8 overflow-hidden">
-        {/* Left: Device Pool (Responsive Width) */}
+        {/* Left: Device Pool */}
         <div className="w-1/3 min-w-[350px] max-w-[500px] flex flex-col gap-6 shrink-0">
           <div className="flex flex-col gap-3">
             <h3 className="text-[11px] font-black text-white/40 uppercase tracking-widest text-center">Daftar Perangkat ({devices.length})</h3>
@@ -276,18 +328,17 @@ export default function App() {
               </div>
             ) : (
               devices.map(id => (
-                <div
-                  key={id}
-                  onClick={() => toggleDevice(id)}
+                <div 
+                  key={id} 
+                  onClick={() => toggleDevice(id)} 
                   className={`p-7 border transition-all cursor-pointer ${selectedDevices.includes(id) ? 'border-white shadow-[0_0_15px_rgba(255,255,255,0.25)]' : 'border-[#222] hover:border-white/10'}`}
-                  style={{ borderRadius: '0px !important' }}
                 >
                   <div className="flex items-center justify-between mb-5">
                     <div className="flex flex-col min-w-0">
                       <span className="text-[17px] font-bold truncate pr-4 leading-tight">{deviceDetails[id]?.['ro.product.model'] || id}</span>
                       <span className="text-[11px] text-white/25 font-mono tracking-tight">SN: {id}</span>
                     </div>
-                    <div className={`w-6 h-6 border flex items-center justify-center transition-all ${selectedDevices.includes(id) ? 'bg-white border-white shadow-[0_0_10px_rgba(255,255,255,0.4)]' : 'border-white/10'}`} style={{ borderRadius: '0px !important' }}>
+                    <div className={`w-6 h-6 border flex items-center justify-center transition-all ${selectedDevices.includes(id) ? 'bg-white border-white' : 'border-white/10'}`}>
                       {selectedDevices.includes(id) && <Check className="w-3.5 h-3.5 text-black font-black" />}
                     </div>
                   </div>
@@ -303,7 +354,7 @@ export default function App() {
 
         {/* Right: Dashboard */}
         <div className="flex-1 flex flex-col gap-8 min-w-0">
-
+          
           {/* WIFI CONFIG CARD */}
           <div className="p-8 bg-[#1a1a1a] border border-[#222]">
             <div className="flex items-center justify-center mb-6">
@@ -313,16 +364,14 @@ export default function App() {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-8">
-              <input value={ssid} onChange={e => setSsid(e.target.value)} className="win-input px-6 py-4" placeholder="Nama WiFi (SSID)" style={{ borderRadius: '0px !important' }} />
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="win-input px-6 py-4" placeholder="Kata Sandi" style={{ borderRadius: '0px !important' }} />
+              <input value={ssid} onChange={e => setSsid(e.target.value)} className="win-input px-6 py-4" placeholder="Nama WiFi (SSID)" />
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="win-input px-6 py-4" placeholder="Kata Sandi" />
             </div>
           </div>
 
-          {/* MASTER SEQUENCE CARD 1x4 */}
+          {/* MASTER SEQUENCE CARD */}
           <div className="p-8 bg-[#1a1a1a] border border-[#222] relative overflow-hidden">
-            {/* Breadcrumb Header */}
             <div className="flex items-center justify-center mb-8">
-              {/* Animated Breadcrumb Progress */}
               <div className="flex items-center gap-2">
                 <div className={`flex items-center gap-2 transition-all duration-500 ${!seqSkipWz ? 'hidden' : ''} ${currentStep === 1 ? 'opacity-100' : (currentStep && currentStep > 1 ? 'opacity-30' : 'opacity-10')}`}>
                   <span className={`text-[10px] font-black uppercase tracking-widest ${currentStep === 1 ? 'text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.8)]' : ''}`}>Skip WZ</span>
@@ -340,63 +389,31 @@ export default function App() {
 
             <div className="flex flex-col gap-6">
               <div className="grid grid-cols-3 gap-6">
-                {/* Toggle Skip Wz */}
-                <div
-                  onClick={() => !loading && setSeqSkipWz(!seqSkipWz)}
-                  className={`p-6 border transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqSkipWz ? 'border-blue-500 bg-blue-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}
-                  style={{ borderRadius: '0px !important' }}
-                >
-                  <div className={`w-5 h-5 border flex items-center justify-center transition-all ${seqSkipWz ? 'bg-blue-500 border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'border-white/20'}`} style={{ borderRadius: '0px !important' }}>
+                <div onClick={() => !loading && setSeqSkipWz(!seqSkipWz)} className={`p-6 border transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqSkipWz ? 'border-blue-500 bg-blue-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}>
+                  <div className={`w-5 h-5 border flex items-center justify-center transition-all ${seqSkipWz ? 'bg-blue-500 border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'border-white/20'}`}>
                     {seqSkipWz && <Check className="w-3 h-3 text-white font-black" />}
                   </div>
                   <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqSkipWz ? 'text-blue-400' : 'text-white/40'}`}>Skip Wizard</span>
                 </div>
-
-                {/* Toggle GBA */}
-                <div
-                  onClick={() => !loading && setSeqGba(!seqGba)}
-                  className={`p-6 border transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqGba ? 'border-purple-500 bg-purple-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}
-                  style={{ borderRadius: '0px !important' }}
-                >
-                  <div className={`w-5 h-5 border flex items-center justify-center transition-all ${seqGba ? 'bg-purple-500 border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.5)]' : 'border-white/20'}`} style={{ borderRadius: '0px !important' }}>
+                <div onClick={() => !loading && setSeqGba(!seqGba)} className={`p-6 border transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqGba ? 'border-purple-500 bg-purple-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}>
+                  <div className={`w-5 h-5 border flex items-center justify-center transition-all ${seqGba ? 'bg-purple-500 border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.5)]' : 'border-white/20'}`}>
                     {seqGba && <Check className="w-3 h-3 text-white font-black" />}
                   </div>
                   <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqGba ? 'text-purple-400' : 'text-white/40'}`}>Setup GBA</span>
                 </div>
-
-                {/* Toggle WiFi */}
-                <div
-                  onClick={() => !loading && setSeqWifi(!seqWifi)}
-                  className={`p-6 border transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqWifi ? 'border-green-500 bg-green-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}
-                  style={{ borderRadius: '0px !important' }}
-                >
-                  <div className={`w-5 h-5 border flex items-center justify-center transition-all ${seqWifi ? 'bg-green-500 border-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'border-white/20'}`} style={{ borderRadius: '0px !important' }}>
+                <div onClick={() => !loading && setSeqWifi(!seqWifi)} className={`p-6 border transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqWifi ? 'border-green-500 bg-green-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}>
+                  <div className={`w-5 h-5 border flex items-center justify-center transition-all ${seqWifi ? 'bg-green-500 border-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'border-white/20'}`}>
                     {seqWifi && <Check className="w-3 h-3 text-white font-black" />}
                   </div>
                   <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqWifi ? 'text-green-400' : 'text-white/40'}`}>WiFi Sync</span>
                 </div>
               </div>
-
-              {/* Execute Button */}
-              <button
-                onClick={runMasterSequence}
-                disabled={loading || (!seqSkipWz && !seqGba && !seqWifi)}
-                className={`w-full py-5 transition-all font-black uppercase tracking-widest text-[14px] flex items-center justify-center gap-3 border-2 ${loading ? 'bg-[#111] border-[#333] text-white/40 cursor-not-allowed' : 'bg-white text-black border-white hover:bg-gray-200 disabled:opacity-30'}`}
-                style={{ borderRadius: '0px !important' }}
-              >
-                {loading && currentStep !== null ? (
-                  <RefreshCw className="w-6 h-6 animate-spin" />
-                ) : (
-                  <Play className="w-6 h-6" />
-                )}
+              <button onClick={runMasterSequence} disabled={loading || (!seqSkipWz && !seqGba && !seqWifi)} className={`w-full py-5 transition-all font-black uppercase tracking-widest text-[14px] flex items-center justify-center gap-3 border-2 ${loading ? 'bg-[#111] border-[#333] text-white/40 cursor-not-allowed' : 'bg-white text-black border-white hover:bg-gray-200 disabled:opacity-30'}`}>
+                {loading && currentStep !== null ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Play className="w-6 h-6" />}
                 <span>{loading && currentStep !== null ? 'Memproses...' : 'Jalankan Automasi'}</span>
               </button>
             </div>
-
-            {/* Loading Progress Bar at bottom of card */}
-            {loading && currentStep !== null && (
-              <div className="absolute bottom-0 left-0 h-1 bg-blue-500 w-full animate-pulse"></div>
-            )}
+            {loading && currentStep !== null && <div className="absolute bottom-0 left-0 h-1 bg-blue-500 w-full animate-pulse"></div>}
           </div>
 
           {/* System Log */}
