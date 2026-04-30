@@ -298,13 +298,10 @@ export default function App() {
         </div>
       )}
 
-      {/* ── NAVBAR (Logo & Title) ── */}
+      {/* ── NAVBAR ── */}
       <header className="flex items-center px-8 h-14 bg-[#151515] border-b border-[#222] shrink-0 relative" data-tauri-drag-region>
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="flex items-center gap-3">
-            <img src="/src/assets/logo.png" alt="Logo" className="w-6 h-6 object-contain shadow-[0_0_10px_rgba(59,130,246,0.5)]" />
-            <span className="text-[16px] font-black tracking-[0.2em] uppercase text-white/90">FlashKit</span>
-          </div>
+          <span className="text-[16px] font-black tracking-[0.2em] uppercase text-white/90">FlashKit</span>
         </div>
         <div className="flex-1" />
       </header>
