@@ -150,6 +150,17 @@
   pointer-events: none;
 }
 
+.device-card.busy-state {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(1);
+}
+
+.device-card.busy-state:hover {
+  box-shadow: none;
+  background: var(--bg-card);
+}
+
 .dev-progress-bg {
   position: absolute;
   top: 0; left: 0; bottom: 0;

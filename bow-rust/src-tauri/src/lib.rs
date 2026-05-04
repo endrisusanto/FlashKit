@@ -459,6 +459,67 @@ fn send_at_command(port_name: String, command: String) -> Result<String, String>
 }
 
 // ─────────────────────────────────────────────
+//  Busy Device Tracking (Cross-Instance)
+// ─────────────────────────────────────────────
+
+const BUSY_FILE: &str = if cfg!(target_os = "windows") {
+    "C:\\Windows\\Temp\\flashkit_busy.json"
+} else {
+    "/tmp/flashkit_busy.json"
+};
+
+fn read_busy_set() -> std::collections::HashSet<String> {
+    if let Ok(data) = std::fs::read_to_string(BUSY_FILE) {
+        if let Ok(v) = serde_json::from_str::<std::collections::HashSet<String>>(&data) {
+            return v;
+        }
+    }
+    std::collections::HashSet::new()
+}
+
+fn write_busy_set(set: &std::collections::HashSet<String>) {
+    if let Ok(json) = serde_json::to_string(set) {
+        let _ = std::fs::write(BUSY_FILE, json);
+    }
+}
+
+#[tauri::command]
+fn mark_busy(serials: Vec<String>) {
+    let mut set = read_busy_set();
+    for s in serials { set.insert(s); }
+    write_busy_set(&set);
+}
+
+#[tauri::command]
+fn clear_busy(serials: Vec<String>) {
+    let mut set = read_busy_set();
+    for s in &serials { set.remove(s); }
+    write_busy_set(&set);
+}
+
+#[tauri::command]
+fn get_busy_devices() -> Vec<String> {
+    read_busy_set().into_iter().collect()
+}
+
+#[tauri::command]
+fn emergency_stop() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        // Kill odin4.exe and adb.exe on Windows
+        let _ = Command::new("taskkill").args(&["/F", "/IM", "odin4.exe", "/T"]).creation_flags(0x08000000).output();
+        let _ = Command::new("taskkill").args(&["/F", "/IM", "adb.exe", "/T"]).creation_flags(0x08000000).output();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Kill odin4 and adb on Linux/macOS
+        let _ = Command::new("pkill").arg("-9").arg("odin4").output();
+        let _ = Command::new("pkill").arg("-9").arg("adb").output();
+    }
+    Ok(())
+}
+
+// ─────────────────────────────────────────────
 //  App Entry Point
 // ─────────────────────────────────────────────
 
@@ -488,7 +549,12 @@ pub fn run() {
             // Odin flash commands
             odin_list_devices,
             odin_flash_device,
-            odin_check_file
+            odin_check_file,
+            // Cross-instance busy tracking
+            mark_busy,
+            clear_busy,
+            get_busy_devices,
+            emergency_stop
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X, Download } from "lucide-react";
+import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X, Download, ShieldAlert } from "lucide-react";
 import OdinFlash, { OdinFlashRef } from "./OdinFlash";
 import logo from './assets/logo.png';
 import confetti from 'canvas-confetti';
@@ -86,6 +86,9 @@ export default function App() {
   const [seqGba, setSeqGba] = useState(localStorage.getItem('seqGba') !== 'false');
   const [seqWifi, setSeqWifi] = useState(localStorage.getItem('seqWifi') !== 'false');
   const [currentStep, setCurrentStep] = useState<number | null>(null);
+  const [busyDevices, setBusyDevices] = useState<string[]>([]);
+  const [isStopping, setIsStopping] = useState(false);
+  const stopRequested = useRef(false);
 
   const appendLog = (msg: string) => {
     const time = new Date().toLocaleTimeString();
@@ -109,6 +112,38 @@ export default function App() {
 
     const t = setTimeout(() => setShowSplash(false), 2000);
     return () => clearTimeout(t);
+  }, []);
+
+  const handleEmergencyStop = async () => {
+    if (stopRequested.current) return;
+    stopRequested.current = true;
+    setIsStopping(true);
+    appendLog("‼ EMERGENCY STOP DIAKTIFKAN! Mematikan semua proses...");
+    
+    try {
+      await invoke("emergency_stop");
+      appendLog("✓ Semua proses Odin & ADB telah dihentikan paksa.");
+    } catch (e) {
+      appendLog(`✗ Gagal menghentikan proses: ${e}`);
+    }
+
+    // Reset status setelah beberapa detik
+    setTimeout(() => {
+      stopRequested.current = false;
+      setIsStopping(false);
+    }, 3000);
+  };
+
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const busy: string[] = await invoke("get_busy_devices");
+        setBusyDevices(busy);
+      } catch { }
+    };
+    poll();
+    const interval = setInterval(poll, 2000);
+    return () => clearInterval(interval);
   }, []);
 
   const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -352,125 +387,156 @@ export default function App() {
     if (!isSequence) setLoading(false);
   };
 
-  const forceDownloadMode = async (e?: React.MouseEvent) => {
+  const forceDownloadMode = async () => {
     if (downloadSelectedDevices.length === 0) return;
 
-    if (e) {
-      const x = e.clientX / window.innerWidth;
-      const y = e.clientY / window.innerHeight;
-      await confetti({ particleCount: 60, spread: 70, origin: { x, y }, colors: ['#3b82f6', '#a855f7', '#22c55e'] });
+    // Cek ulang apakah ada yang tiba-tiba busy di instance lain
+    const busy: string[] = await invoke("get_busy_devices");
+    const stillAvailable = downloadSelectedDevices.filter(id => !busy.includes(id));
+    
+    if (stillAvailable.length === 0) {
+      appendLog("✗ Gagal: Semua perangkat terpilih sedang sibuk di jendela lain.");
+      setShowDownloadModal(false);
+      return;
     }
 
     setLoading(true);
-    await new Promise(r => setTimeout(r, 50));
+    // Mark as busy
+    try { await invoke("mark_busy", { serials: stillAvailable }); } catch { }
 
-    appendLog(`Memaksa ${downloadSelectedDevices.length} perangkat ke Download Mode...`);
+    try {
+      appendLog(`Memaksa ${stillAvailable.length} perangkat ke Download Mode...`);
 
-    await Promise.all(downloadSelectedDevices.map(async (dev) => {
-      try {
-        await invoke("run_adb", { args: ["-s", dev, "reboot", "download"] });
-        appendLog(`[${dev}] ✓ Perintah Reboot Download Mode dikirim`);
-      } catch (e: any) {
-        appendLog(`[${dev}] ✗ Gagal: ${e}`);
+      for (const dev of stillAvailable) {
+        if (stopRequested.current) break;
+        try {
+          await invoke("run_adb", { args: ["-s", dev, "reboot", "download"] });
+          appendLog(`[${dev}] ✓ Perintah Reboot Download Mode dikirim`);
+        } catch (e: any) {
+          appendLog(`[${dev}] ✗ Gagal: ${e}`);
+        }
       }
-    }));
-
-    setLoading(false);
-    setShowDownloadModal(false);
-    setDownloadSelectedDevices([]);
+    } finally {
+      // Clear busy
+      try { await invoke("clear_busy", { serials: stillAvailable }); } catch { }
+      setLoading(false);
+      setShowDownloadModal(false);
+      setDownloadSelectedDevices([]);
+    }
   };
 
-  const runMasterSequence = async (e?: React.MouseEvent) => {
+  const runMasterSequence = async () => {
     if (loading) return;
 
-    if (e) {
-      const x = e.clientX / window.innerWidth;
-      const y = e.clientY / window.innerHeight;
-      // Tunggu animasi confetti selesai (await) agar tidak frame-drop saat React re-render
-      await confetti({ particleCount: 60, spread: 70, origin: { x, y }, colors: ['#3b82f6', '#a855f7', '#22c55e'] });
+    // Proteksi: Cek apakah ada perangkat terpilih yang sedang sibuk di jendela lain
+    const busy: string[] = await invoke("get_busy_devices");
+    const activeSelection = selectedDevices.filter(id => !busy.includes(id));
+
+    if (activeSelection.length === 0 && selectedDevices.length > 0) {
+      appendLog("✗ Master Sequence dibatalkan: Perangkat sedang sibuk di jendela lain.");
+      return;
     }
 
     setLoading(true);
-    await new Promise(r => setTimeout(r, 50));
+    // Mark as busy for the whole sequence
+    try { await invoke("mark_busy", { serials: activeSelection }); } catch { }
 
-    appendLog("==== MEMULAI MASTER SEQUENCE ====");
+    try {
+      await new Promise(r => setTimeout(r, 50));
 
-    let preFlashAdb: string[] = [];
-    try { preFlashAdb = await invoke<string[]>("get_devices"); } catch (e) { }
+      appendLog("==== MEMULAI MASTER SEQUENCE ====");
 
-    if (seqOdin) {
-      setCurrentStep(0);
-      if (odinRef.current) {
-        appendLog("Tahap 0: Menjalankan Odin Flashing...");
-        if (!odinRef.current.hasCheckedDevices()) {
-          appendLog("✗ Odin Flash dilewati: Tidak ada perangkat yang dicentang di tab Odin Flash.");
-        } else {
-          const flashResult = await odinRef.current.startFlash();
-          if (!flashResult) {
-            appendLog("⚠ Odin Flash memiliki kegagalan atau file firmware belum dipilih!");
-            appendLog("==== MASTER SEQUENCE DIBATALKAN ====");
-            setLoading(false);
-            setCurrentStep(null);
-            return;
+      let preFlashAdb: string[] = [];
+      try { preFlashAdb = await invoke<string[]>("get_devices"); } catch (e) { }
+
+      if (seqOdin) {
+        if (stopRequested.current) throw new Error("STOP");
+        setCurrentStep(0);
+        if (odinRef.current) {
+          appendLog("Tahap 0: Menjalankan Odin Flashing...");
+          if (!odinRef.current.hasCheckedDevices()) {
+            appendLog("✗ Odin Flash dilewati: Tidak ada perangkat yang dicentang di tab Odin Flash.");
           } else {
-            appendLog("✓ Odin Flash Selesai.");
-            appendLog("⏳ Menunggu perangkat reboot dan terdeteksi ADB (Maksimal 10 Menit)...");
-
-            const adbReady = await waitForAdb(600000, preFlashAdb);
-            if (!adbReady) {
-              appendLog("✗ Timeout: Perangkat tidak terdeteksi oleh ADB setelah 10 menit.");
-              appendLog("==== MASTER SEQUENCE DIBATALKAN ====");
-              setLoading(false);
-              setCurrentStep(null);
+            const flashResult = await odinRef.current.startFlash();
+            if (!flashResult) {
+              appendLog("⚠ Odin Flash memiliki kegagalan atau file firmware belum dipilih!");
               return;
-            }
+            } else {
+              appendLog("✓ Odin Flash Selesai.");
+              appendLog("⏳ Menunggu perangkat reboot dan terdeteksi ADB (Maksimal 10 Menit)...");
 
-            appendLog("✓ Perangkat ADB terdeteksi! Menunggu stabilisasi sistem (10 detik)...");
-            await delay(10000); // Ekstra waktu agar layanan background android siap
-
-            // Refresh list device di layar agar terpilih untuk tahap selanjutnya
-            await refreshDevices();
-
-            try {
-              const currentAdb = await invoke<string[]>("get_devices");
-              const newlyBooted = currentAdb.filter(d => !preFlashAdb.includes(d));
-              if (newlyBooted.length > 0) {
-                setSelectedDevices(newlyBooted);
-                appendLog(`[Auto] Mengunci proses selanjutnya hanya untuk ${newlyBooted.length} perangkat yang baru di-flash.`);
+              const adbReady = await waitForAdb(600000, preFlashAdb);
+              if (!adbReady) {
+                appendLog("✗ Timeout: Perangkat tidak terdeteksi oleh ADB setelah 10 menit.");
+                return;
               }
-            } catch (e) { }
+
+              appendLog("✓ Perangkat ADB terdeteksi! Menunggu stabilisasi sistem (10 detik)...");
+              await delay(10000); // Ekstra waktu agar layanan background android siap
+
+              // Refresh list device di layar agar terpilih untuk tahap selanjutnya
+              await refreshDevices();
+
+              try {
+                const currentAdb = await invoke<string[]>("get_devices");
+                const newlyBooted = currentAdb.filter(d => !preFlashAdb.includes(d));
+                if (newlyBooted.length > 0) {
+                  setSelectedDevices(newlyBooted);
+                  appendLog(`[Auto] Mengunci proses selanjutnya hanya untuk ${newlyBooted.length} perangkat yang baru di-flash.`);
+                }
+              } catch (e) { }
+            }
           }
         }
       }
-    }
 
-    if (seqSkipWz) {
-      setCurrentStep(1);
-      await skipWz(true);
-      await delay(2000);
-    }
+      if (seqSkipWz) {
+        if (stopRequested.current) throw new Error("STOP");
+        setCurrentStep(1);
+        await skipWz(true);
+        await delay(2000);
+      }
 
-    if (seqGba) {
-      setCurrentStep(2);
-      await setupPrecondition(true);
-      await delay(2000);
-    }
+      if (seqGba) {
+        if (stopRequested.current) throw new Error("STOP");
+        setCurrentStep(2);
+        await setupPrecondition(true);
+        await delay(2000);
+      }
 
-    if (seqWifi) {
-      setCurrentStep(3);
-      await connectWifi(true);
-      await delay(2000);
-    }
+      if (seqWifi) {
+        if (stopRequested.current) throw new Error("STOP");
+        setCurrentStep(3);
+        await connectWifi(true);
+        await delay(2000);
+      }
 
-    setCurrentStep(null);
-    setLoading(false);
-    appendLog("==== MASTER SEQUENCE SELESAI ====");
-    startConfettiLoop();
-    playSuccessSound();
+      appendLog("==== MASTER SEQUENCE SELESAI ====");
+      startConfettiLoop();
+      playSuccessSound();
+    } catch (e: any) {
+      if (e?.message === "STOP" || stopRequested.current) {
+        appendLog("‼ MASTER SEQUENCE DIHENTIKAN OLEH USER.");
+      } else {
+        appendLog(`✗ Master Sequence Gagal: ${e}`);
+      }
+    } finally {
+      setCurrentStep(null);
+      setLoading(false);
+      // Clear busy at the end
+      try { await invoke("clear_busy", { serials: activeSelection }); } catch { }
+    }
   };
 
-  const toggleDevice = (id: string) => setSelectedDevices(p => p.includes(id) ? p.filter(d => d !== id) : [...p, id]);
-  const selectAll = () => setSelectedDevices(selectedDevices.length === devices.length ? [] : [...devices]);
+  const toggleDevice = (id: string) => {
+    if (busyDevices.includes(id)) return;
+    setSelectedDevices(p => p.includes(id) ? p.filter(d => d !== id) : [...p, id]);
+  };
+
+  const selectAll = () => {
+    const available = devices.filter(id => !busyDevices.includes(id));
+    setSelectedDevices(selectedDevices.length === available.length ? [] : [...available]);
+  };
 
   if (showSplash) {
     return (
@@ -624,20 +690,11 @@ export default function App() {
                     >
                       <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 border transition-all
                       ${downloadSelectedDevices.includes(dev) ? 'bg-blue-500 border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'bg-transparent border-white/20'}`}>
-                        {downloadSelectedDevices.includes(dev) && <Check className="w-4 h-4 text-white font-black" />}
+                        {downloadSelectedDevices.includes(dev) && <Check className="w-4 h-4 text-white" />}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-bold text-[15px] truncate">{dev}</div>
-                        {deviceDetails[dev] && (
-                          <div className="flex flex-col gap-1 mt-1.5">
-                            <div className="text-[13px] text-white/50 truncate">
-                              {deviceDetails[dev]["ro.product.model"]} • CSC: <span className="font-mono text-white/70">{deviceDetails[dev]["ro.csc.sales_code"] || 'N/A'}</span>
-                            </div>
-                            <div className="text-[11px] text-white/30 truncate font-mono bg-white/5 p-1 px-2 rounded w-fit" title={deviceDetails[dev]["ro.build.fingerprint"]}>
-                              {deviceDetails[dev]["ro.build.fingerprint"] || 'Memuat fingerprint...'}
-                            </div>
-                          </div>
-                        )}
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <Smartphone className="w-5 h-5 text-white/30 shrink-0" />
+                        <span className="font-mono font-bold text-[15px] tracking-wide truncate">{dev}</span>
                       </div>
                     </div>
                   ))
@@ -646,7 +703,7 @@ export default function App() {
 
               <div className="border-t border-white/5 pt-6">
                 <button
-                  onClick={(e) => forceDownloadMode(e)}
+                  onClick={() => forceDownloadMode()}
                   disabled={downloadSelectedDevices.length === 0 || loading}
                   className="w-full py-5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed font-bold transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] flex justify-center items-center gap-2"
                 >
@@ -717,9 +774,19 @@ export default function App() {
                   devices.map(id => (
                     <div
                       key={id}
-                      onClick={() => toggleDevice(id)}
-                      className={`p-7 rounded-2xl border transition-all cursor-pointer ${selectedDevices.includes(id) ? 'border-white shadow-[0_0_15px_rgba(255,255,255,0.25)]' : 'border-[#222] hover:border-white/10'}`}
+                      onClick={() => !busyDevices.includes(id) && toggleDevice(id)}
+                      className={`p-7 rounded-2xl border transition-all cursor-pointer relative overflow-hidden ${busyDevices.includes(id) ? 'opacity-50 grayscale cursor-not-allowed border-white/5 bg-white/5' : selectedDevices.includes(id) ? 'border-white shadow-[0_0_15px_rgba(255,255,255,0.25)]' : 'border-[#222] hover:border-white/10'}`}
                     >
+                      {busyDevices.includes(id) && (
+                        <div style={{
+                          position: 'absolute', top: 12, right: 12,
+                          background: '#dc2626', color: 'white',
+                          fontSize: '10px', fontWeight: 900, letterSpacing: '0.15em',
+                          padding: '2px 8px', borderRadius: '4px',
+                          textTransform: 'uppercase', zIndex: 10,
+                          boxShadow: '0 0 10px rgba(220,38,38,0.5)'
+                        }}>BUSY</div>
+                      )}
                       <div className="flex items-center justify-between mb-5">
                         <div className="flex flex-col min-w-0">
                           <span className="text-[17px] font-bold truncate pr-4 leading-tight">{deviceDetails[id]?.['ro.product.model'] || id}</span>
@@ -805,7 +872,7 @@ export default function App() {
                       <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqWifi ? 'text-green-400' : 'text-white/40'}`}>WiFi Connect</span>
                     </div>
                   </div>
-                  <button onClick={(e) => runMasterSequence(e)} disabled={loading || (!seqOdin && !seqSkipWz && !seqGba && !seqWifi)} className={`w-full mt-2 py-6 rounded-xl transition-all font-black uppercase tracking-widest text-[16px] flex items-center justify-center gap-4 border-2 ${loading ? 'bg-[#111] border-[#333] text-white/40 cursor-not-allowed' : 'bg-white text-black border-white hover:bg-gray-200 disabled:opacity-30'}`}>
+                  <button onClick={() => runMasterSequence()} disabled={loading || (!seqOdin && !seqSkipWz && !seqGba && !seqWifi)} className={`w-full mt-2 py-6 rounded-xl transition-all font-black uppercase tracking-widest text-[16px] flex items-center justify-center gap-4 border-2 ${loading ? 'bg-[#111] border-[#333] text-white/40 cursor-not-allowed' : 'bg-white text-black border-white hover:bg-gray-200 disabled:opacity-30'}`}>
                     {loading && currentStep !== null ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Play className="w-6 h-6" />}
                     <span>{loading && currentStep !== null ? 'Memproses...' : 'Jalankan Automasi'}</span>
                   </button>
@@ -847,35 +914,41 @@ export default function App() {
             </div>
           </div>
 
-          {/* ── FLOATING ACTION BUTTON ── */}
-          <button
-            onClick={async () => {
-              setShowDownloadModal(true);
-              setLoading(true);
-              try {
-                // Auto list ADB device saat ditekan
-                const list: string[] = await invoke("get_devices");
-                setDevices(list);
-                setDownloadSelectedDevices(list); // Pilih semua otomatis
+          {/* ── FLOATING ACTION BUTTONS ── */}
+          <div className="absolute bottom-20 right-8 flex flex-col gap-4 z-40">
+            {/* Emergency Stop Button */}
+            <button
+              onClick={handleEmergencyStop}
+              className={`w-14 h-14 rounded-full flex items-center justify-center transition-all border shadow-lg ${isStopping || loading
+                ? "bg-red-600 hover:bg-red-500 border-red-400 shadow-red-900/50 animate-pulse"
+                : "bg-red-900/30 hover:bg-red-900/50 border-red-900/50 text-red-500/50 hover:text-red-500"
+                }`}
+              title="EMERGENCY STOP (Cancel All Processes)"
+            >
+              <ShieldAlert className="w-7 h-7" />
+            </button>
 
-                // Fetch info tambahan jika belum ada
-                for (const dev of list) {
-                  if (!deviceDetails[dev]) {
-                    const info: any = await invoke("get_device_info", { serial: dev });
-                    setDeviceDetails(prev => ({ ...prev, [dev]: info }));
-                  }
+            {/* Download Mode Button */}
+            <button
+              onClick={async () => {
+                setShowDownloadModal(true);
+                setLoading(true);
+                try {
+                  const list: string[] = await invoke("get_devices");
+                  setDevices(list);
+                  setDownloadSelectedDevices(list);
+                } catch (e) {
+                  console.error(e);
+                } finally {
+                  setLoading(false);
                 }
-              } catch (e) {
-                console.error(e);
-              } finally {
-                setLoading(false);
-              }
-            }}
-            className="absolute bottom-20 right-8 w-14 h-14 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-[0_0_30px_rgba(37,99,235,0.5)] flex items-center justify-center transition-transform hover:scale-110 active:scale-95 z-40 border border-blue-400"
-            title="Force Download Mode"
-          >
-            <Download className="w-6 h-6" />
-          </button>
+              }}
+              className="w-14 h-14 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-[0_0_30px_rgba(37,99,235,0.5)] flex items-center justify-center transition-transform hover:scale-110 active:scale-95 border border-blue-400"
+              title="Force Download Mode"
+            >
+              <Download className="w-6 h-6" />
+            </button>
+          </div>
         </main>
 
         <footer className="h-10 bg-[#0d0d0d] border-t border-[#222] flex items-center px-8 justify-between shrink-0 relative z-50">
@@ -883,7 +956,7 @@ export default function App() {
             <div className={`w-2.5 h-2.5 rounded-full ${devices.length > 0 ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : 'bg-white/10'}`} />
             <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{devices.length} Units Connected</span>
           </div>
-          <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.6.0 &bull; FlashKit By Endri-Pro</span>
+          <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.6.1 &bull; FlashKit By Endri-Pro</span>
         </footer>
 
       </div>

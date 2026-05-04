@@ -23,6 +23,7 @@ interface DeviceData {
   progress: number;
   log: string;
   checked: boolean;
+  busyByOther?: boolean;
 }
 
 export interface OdinFlashRef {
@@ -66,6 +67,7 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
   const [devices, setDevices] = useState<Record<string, DeviceData>>({});
   const [isFlashing, setIsFlashing] = useState(false);
   const [logModal, setLogModal] = useState<{ device: string; log: string } | null>(null);
+  const [busyDevices, setBusyDevices] = useState<string[]>([]);
 
   const devicesRef = useRef(devices);
   const isFlashingRef = useRef(isFlashing);
@@ -81,7 +83,21 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
     }
   }));
 
-  // ── Device Scan ──────────────────────────────────────────────────────
+  // ── Busy device polling (cross-instance) ──────────────────────────────
+
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const busy: string[] = await invoke("get_busy_devices");
+        setBusyDevices(busy);
+      } catch { }
+    };
+    poll();
+    const interval = setInterval(poll, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ── Odin device scanning ──────────────────────────────────────────────────────
 
   async function scanDevices() {
     if (isFlashingRef.current) return;
@@ -96,7 +112,7 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
               port: extractUsbPort(dev),
               status: "Ready",
               progress: 0,
-              checked: true,
+              checked: false,
               log: `${getTimestamp()} Attached at ${dev}\n${getTimestamp()} Waiting for flash command...`,
             };
           }
@@ -272,6 +288,11 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
     }
 
     setIsFlashing(true);
+
+    // Tandai device sebagai busy untuk instance FlashKit lain
+    const checkedSerials = checked.map(([dev]) => dev);
+    try { await invoke("mark_busy", { serials: checkedSerials }); } catch { }
+
     let anyFail = false;
     let anyPass = false;
 
@@ -308,6 +329,9 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
       })
     );
 
+    // Hapus busy flag setelah selesai
+    try { await invoke("clear_busy", { serials: checkedSerials }); } catch { }
+
     setIsFlashing(false);
     return !anyFail && anyPass;
   }
@@ -330,10 +354,21 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
           Object.entries(devices).map(([dev, data]) => (
             <div
               key={dev}
-              className={`device-card ${data.status === "Flashing..." ? "flashing-state" : ""}`}
+              className={`device-card ${data.status === "Flashing..." ? "flashing-state" : ""} ${busyDevices.includes(dev) && data.status === "Ready" ? "busy-state" : ""}`}
               onClick={() => setLogModal({ device: dev, log: data.log })}
             >
               <div className="dev-progress-bg" style={{ width: `${data.progress}%` }}></div>
+              {/* BUSY badge jika device ini sedang dipakai instance lain */}
+              {busyDevices.includes(dev) && data.status === "Ready" && (
+                <div style={{
+                  position: 'absolute', top: 6, right: 8,
+                  background: '#dc2626', color: 'white',
+                  fontSize: '9px', fontWeight: 900, letterSpacing: '0.15em',
+                  padding: '2px 7px', borderRadius: '4px',
+                  textTransform: 'uppercase', zIndex: 10,
+                  boxShadow: '0 0 8px rgba(220,38,38,0.5)'
+                }}>BUSY</div>
+              )}
               <div className="dev-content">
                 <div className="dev-icon-area">
                   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -345,12 +380,12 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
                     className="custom-check-wrapper"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (!isFlashing) {
+                      if (!isFlashing && !(busyDevices.includes(dev) && data.status === "Ready")) {
                         setDevices(prev => ({ ...prev, [dev]: { ...prev[dev], checked: !prev[dev].checked } }));
                       }
                     }}
                   >
-                    <input type="checkbox" checked={data.checked} readOnly disabled={isFlashing} />
+                    <input type="checkbox" checked={data.checked} readOnly disabled={isFlashing || (busyDevices.includes(dev) && data.status === "Ready")} />
                     <div className="custom-checkbox">
                       <svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"></path></svg>
                     </div>
