@@ -231,6 +231,7 @@ fn get_device_info(
         "ro.build.PDA",
         "ro.csc.sales_code",
         "ro.csc.country_code",
+        "ro.build.fingerprint",
     ];
 
     let mut info = std::collections::HashMap::new();

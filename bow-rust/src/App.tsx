@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X } from "lucide-react";
+import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X, Download } from "lucide-react";
 import OdinFlash, { OdinFlashRef } from "./OdinFlash";
 import logo from './assets/logo.png';
 import confetti from 'canvas-confetti';
@@ -11,20 +11,20 @@ const playSuccessSound = () => {
     const ctx = new AudioContext();
     const osc = ctx.createOscillator();
     const gainNode = ctx.createGain();
-    
+
     osc.type = 'sine';
     osc.frequency.setValueAtTime(523.25, ctx.currentTime);
     osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1);
     osc.frequency.setValueAtTime(783.99, ctx.currentTime + 0.2);
     osc.frequency.setValueAtTime(1046.50, ctx.currentTime + 0.3);
-    
+
     gainNode.gain.setValueAtTime(0, ctx.currentTime);
     gainNode.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.05);
     gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
-    
+
     osc.connect(gainNode);
     gainNode.connect(ctx.destination);
-    
+
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.8);
   } catch (e) { console.error("Audio error", e); }
@@ -45,7 +45,7 @@ const startConfettiLoop = () => {
       clearInterval(confettiInterval);
       confettiInterval = null;
     }
-    try { confetti.reset(); } catch (e) {}
+    try { confetti.reset(); } catch (e) { }
     window.removeEventListener('mousedown', stopConfetti);
   };
 
@@ -74,6 +74,10 @@ export default function App() {
   const [showAdbWarningModal, setShowAdbWarningModal] = useState(false);
   const [failedDevice, setFailedDevice] = useState<string | null>(null);
 
+  // Download Modal State
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [downloadSelectedDevices, setDownloadSelectedDevices] = useState<string[]>([]);
+
   // Master Sequence States
   const [showSplash, setShowSplash] = useState(true);
   const odinRef = useRef<OdinFlashRef>(null);
@@ -101,8 +105,8 @@ export default function App() {
 
   useEffect(() => {
     // Pre-warm confetti canvas to prevent first-click lag
-    try { confetti({ particleCount: 0 }); } catch (e) {}
-    
+    try { confetti({ particleCount: 0 }); } catch (e) { }
+
     const t = setTimeout(() => setShowSplash(false), 2000);
     return () => clearTimeout(t);
   }, []);
@@ -348,9 +352,37 @@ export default function App() {
     if (!isSequence) setLoading(false);
   };
 
+  const forceDownloadMode = async (e?: React.MouseEvent) => {
+    if (downloadSelectedDevices.length === 0) return;
+
+    if (e) {
+      const x = e.clientX / window.innerWidth;
+      const y = e.clientY / window.innerHeight;
+      await confetti({ particleCount: 60, spread: 70, origin: { x, y }, colors: ['#3b82f6', '#a855f7', '#22c55e'] });
+    }
+
+    setLoading(true);
+    await new Promise(r => setTimeout(r, 50));
+
+    appendLog(`Memaksa ${downloadSelectedDevices.length} perangkat ke Download Mode...`);
+
+    await Promise.all(downloadSelectedDevices.map(async (dev) => {
+      try {
+        await invoke("run_adb", { args: ["-s", dev, "reboot", "download"] });
+        appendLog(`[${dev}] ✓ Perintah Reboot Download Mode dikirim`);
+      } catch (e: any) {
+        appendLog(`[${dev}] ✗ Gagal: ${e}`);
+      }
+    }));
+
+    setLoading(false);
+    setShowDownloadModal(false);
+    setDownloadSelectedDevices([]);
+  };
+
   const runMasterSequence = async (e?: React.MouseEvent) => {
     if (loading) return;
-    
+
     if (e) {
       const x = e.clientX / window.innerWidth;
       const y = e.clientY / window.innerHeight;
@@ -398,7 +430,7 @@ export default function App() {
 
             // Refresh list device di layar agar terpilih untuk tahap selanjutnya
             await refreshDevices();
-            
+
             try {
               const currentAdb = await invoke<string[]>("get_devices");
               const newlyBooted = currentAdb.filter(d => !preFlashAdb.includes(d));
@@ -406,7 +438,7 @@ export default function App() {
                 setSelectedDevices(newlyBooted);
                 appendLog(`[Auto] Mengunci proses selanjutnya hanya untuk ${newlyBooted.length} perangkat yang baru di-flash.`);
               }
-            } catch (e) {}
+            } catch (e) { }
           }
         }
       }
@@ -496,53 +528,135 @@ export default function App() {
           </div>
         )}
 
-      {showAdbWarningModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-[#1a1a1a] border border-orange-500/50 rounded-2xl w-full max-w-md overflow-hidden shadow-[0_0_50px_rgba(249,115,22,0.15)] relative">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-600 to-yellow-500"></div>
-            <div className="p-8">
-              <div className="flex items-center gap-4 mb-6">
-                <div className="w-12 h-12 rounded-full bg-orange-500/10 flex items-center justify-center shrink-0 border border-orange-500/20">
-                  <AlertTriangle className="w-6 h-6 text-orange-400" />
+        {showAdbWarningModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <div className="bg-[#1a1a1a] border border-orange-500/50 rounded-2xl w-full max-w-md overflow-hidden shadow-[0_0_50px_rgba(249,115,22,0.15)] relative">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-600 to-yellow-500"></div>
+              <div className="p-8">
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="w-12 h-12 rounded-full bg-orange-500/10 flex items-center justify-center shrink-0 border border-orange-500/20">
+                    <AlertTriangle className="w-6 h-6 text-orange-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white">Device Not Detected</h3>
+                    <p className="text-[13px] text-white/60 mt-1">Samsung Modem ditemukan tetapi ADB gagal.</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-lg font-black text-white">Device Not Detected</h3>
-                  <p className="text-[13px] text-white/60 mt-1">Samsung Modem ditemukan tetapi ADB gagal.</p>
+
+                <div className="bg-black/50 border border-white/5 rounded-xl p-5 mb-8">
+                  <p className="text-[13px] text-white/80 leading-relaxed mb-4">
+                    Sistem mendeteksi adanya perangkat Samsung yang terhubung, namun tidak merespon perintah ADB.
+                  </p>
+                  <div className="flex flex-col gap-3">
+                    <div className="flex gap-3 items-start">
+                      <span className="flex items-center justify-center w-5 h-5 rounded bg-orange-500/20 text-orange-400 text-[10px] font-black shrink-0 mt-0.5">1</span>
+                      <p className="text-[12px] text-white/60">Pastikan perangkat sudah <strong>aktif / boot up</strong> sepenuhnya ke layar Setup (SUW) atau Homescreen.</p>
+                    </div>
+                    <div className="flex gap-3 items-start">
+                      <span className="flex items-center justify-center w-5 h-5 rounded bg-orange-500/20 text-orange-400 text-[10px] font-black shrink-0 mt-0.5">2</span>
+                      <p className="text-[12px] text-white/60">Pastikan <strong>USB Debugging</strong> (ADB) sudah aktif atau mode <strong>Skip SUW</strong> telah dieksekusi.</p>
+                    </div>
+                    <div className="flex gap-3 items-start">
+                      <span className="flex items-center justify-center w-5 h-5 rounded bg-orange-500/20 text-orange-400 text-[10px] font-black shrink-0 mt-0.5">3</span>
+                      <p className="text-[12px] text-white/60">Jika baru selesai flash Odin, tunggu 1-2 menit hingga device benar-benar menyala.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => setShowAdbWarningModal(false)}
+                    className="flex-1 py-3 px-6 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl transition-all"
+                  >
+                    Mengerti
+                  </button>
                 </div>
               </div>
-              
-              <div className="bg-black/50 border border-white/5 rounded-xl p-5 mb-8">
-                <p className="text-[13px] text-white/80 leading-relaxed mb-4">
-                  Sistem mendeteksi adanya perangkat Samsung yang terhubung, namun tidak merespon perintah ADB.
-                </p>
-                <div className="flex flex-col gap-3">
-                  <div className="flex gap-3 items-start">
-                    <span className="flex items-center justify-center w-5 h-5 rounded bg-orange-500/20 text-orange-400 text-[10px] font-black shrink-0 mt-0.5">1</span>
-                    <p className="text-[12px] text-white/60">Pastikan perangkat sudah <strong>aktif / boot up</strong> sepenuhnya ke layar Setup (SUW) atau Homescreen.</p>
-                  </div>
-                  <div className="flex gap-3 items-start">
-                    <span className="flex items-center justify-center w-5 h-5 rounded bg-orange-500/20 text-orange-400 text-[10px] font-black shrink-0 mt-0.5">2</span>
-                    <p className="text-[12px] text-white/60">Pastikan <strong>USB Debugging</strong> (ADB) sudah aktif atau mode <strong>Skip SUW</strong> telah dieksekusi.</p>
-                  </div>
-                  <div className="flex gap-3 items-start">
-                    <span className="flex items-center justify-center w-5 h-5 rounded bg-orange-500/20 text-orange-400 text-[10px] font-black shrink-0 mt-0.5">3</span>
-                    <p className="text-[12px] text-white/60">Jika baru selesai flash Odin, tunggu 1-2 menit hingga device benar-benar menyala.</p>
-                  </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── DOWNLOAD MODE MODAL ── */}
+        {showDownloadModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="bg-[#111] border border-[#333] rounded-3xl p-8 max-w-2xl w-full shadow-2xl relative">
+              <div className="absolute top-6 right-6 flex items-center gap-4">
+                <button
+                  onClick={refreshDevices}
+                  title="Refresh Daftar Perangkat"
+                  className="flex items-center gap-2 px-4 py-2 text-[11px] font-black uppercase tracking-widest text-white/40 hover:text-white hover:bg-white/10 transition-all rounded-xl border border-white/5"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-blue-500' : ''}`} />
+                  Refresh Device List
+                </button>
+                <button onClick={() => setShowDownloadModal(false)} className="p-2 text-white/40 hover:text-white hover:bg-white/10 transition-all rounded-xl">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-4 mb-6 pr-20">
+                <div className="w-12 h-12 rounded-full bg-blue-500/20 flex items-center justify-center border border-blue-500/30">
+                  <Download className="w-6 h-6 text-blue-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold">Force Download Mode</h2>
+                  <p className="text-sm text-white/50">Reboot perangkat ke mode Odin</p>
                 </div>
               </div>
 
-              <div className="flex gap-4">
+              <div className="flex flex-col gap-4 mb-10 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
+                {loading && devices.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center p-8 gap-4 border border-white/5 rounded-2xl bg-white/[0.02]">
+                    <RefreshCw className="w-8 h-8 animate-spin text-blue-500" />
+                    <span className="text-[12px] font-black uppercase tracking-widest text-white/50">Memindai Perangkat...</span>
+                  </div>
+                ) : devices.length === 0 ? (
+                  <div className="p-4 rounded-xl border border-white/5 bg-white/5 text-center text-sm text-white/40 italic">
+                    Tidak ada perangkat ADB yang terdeteksi.
+                  </div>
+                ) : (
+                  devices.map(dev => (
+                    <div
+                      key={dev}
+                      onClick={() => setDownloadSelectedDevices(p => p.includes(dev) ? p.filter(d => d !== dev) : [...p, dev])}
+                      className={`p-5 rounded-2xl border transition-all cursor-pointer flex items-center gap-5 select-none
+                      ${downloadSelectedDevices.includes(dev) ? 'bg-blue-500/10 border-blue-500/50' : 'bg-black border-white/10 hover:border-white/30'}`}
+                    >
+                      <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 border transition-all
+                      ${downloadSelectedDevices.includes(dev) ? 'bg-blue-500 border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'bg-transparent border-white/20'}`}>
+                        {downloadSelectedDevices.includes(dev) && <Check className="w-4 h-4 text-white font-black" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-[15px] truncate">{dev}</div>
+                        {deviceDetails[dev] && (
+                          <div className="flex flex-col gap-1 mt-1.5">
+                            <div className="text-[13px] text-white/50 truncate">
+                              {deviceDetails[dev]["ro.product.model"]} • CSC: <span className="font-mono text-white/70">{deviceDetails[dev]["ro.csc.sales_code"] || 'N/A'}</span>
+                            </div>
+                            <div className="text-[11px] text-white/30 truncate font-mono bg-white/5 p-1 px-2 rounded w-fit" title={deviceDetails[dev]["ro.build.fingerprint"]}>
+                              {deviceDetails[dev]["ro.build.fingerprint"] || 'Memuat fingerprint...'}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="border-t border-white/5 pt-6">
                 <button
-                  onClick={() => setShowAdbWarningModal(false)}
-                  className="flex-1 py-3 px-6 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl transition-all"
+                  onClick={(e) => forceDownloadMode(e)}
+                  disabled={downloadSelectedDevices.length === 0 || loading}
+                  className="w-full py-5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed font-bold transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] flex justify-center items-center gap-2"
                 >
-                  Mengerti
+                  {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
+                  REBOOT TO DOWNLOAD MODE
                 </button>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
         {/* ── NAVBAR ── */}
         <header className="flex items-center justify-center px-10 h-20 bg-[#0d0d0d] border-b border-[#222] shrink-0" data-tauri-drag-region>
@@ -732,9 +846,39 @@ export default function App() {
               </div>
             </div>
           </div>
+
+          {/* ── FLOATING ACTION BUTTON ── */}
+          <button
+            onClick={async () => {
+              setShowDownloadModal(true);
+              setLoading(true);
+              try {
+                // Auto list ADB device saat ditekan
+                const list: string[] = await invoke("get_devices");
+                setDevices(list);
+                setDownloadSelectedDevices(list); // Pilih semua otomatis
+
+                // Fetch info tambahan jika belum ada
+                for (const dev of list) {
+                  if (!deviceDetails[dev]) {
+                    const info: any = await invoke("get_device_info", { serial: dev });
+                    setDeviceDetails(prev => ({ ...prev, [dev]: info }));
+                  }
+                }
+              } catch (e) {
+                console.error(e);
+              } finally {
+                setLoading(false);
+              }
+            }}
+            className="absolute bottom-20 right-8 w-14 h-14 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-[0_0_30px_rgba(37,99,235,0.5)] flex items-center justify-center transition-transform hover:scale-110 active:scale-95 z-40 border border-blue-400"
+            title="Force Download Mode"
+          >
+            <Download className="w-6 h-6" />
+          </button>
         </main>
 
-        <footer className="h-10 bg-[#0d0d0d] border-t border-[#222] flex items-center px-8 justify-between shrink-0">
+        <footer className="h-10 bg-[#0d0d0d] border-t border-[#222] flex items-center px-8 justify-between shrink-0 relative z-50">
           <div className="flex items-center gap-4">
             <div className={`w-2.5 h-2.5 rounded-full ${devices.length > 0 ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : 'bg-white/10'}`} />
             <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{devices.length} Units Connected</span>
