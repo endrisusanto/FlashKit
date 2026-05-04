@@ -321,7 +321,13 @@ fn find_adb() -> String {
 #[tauri::command]
 fn get_adb_version() -> String {
     let adb_path = find_adb();
-    let output = Command::new(&adb_path).arg("version").output();
+    let mut cmd = Command::new(&adb_path);
+    cmd.arg("version");
+
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    let output = cmd.output();
     match output {
         Ok(out) => format!(
             "Path: {}\n{}",
@@ -340,10 +346,13 @@ fn get_app_dir() -> String {
 #[tauri::command]
 fn get_devices() -> Result<Vec<String>, String> {
     let adb_path = find_adb();
-    let output = Command::new(&adb_path)
-        .arg("devices")
-        .output()
-        .map_err(|e| e.to_string())?;
+    let mut cmd = Command::new(&adb_path);
+    cmd.arg("devices");
+
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    let output = cmd.output().map_err(|e| e.to_string())?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut devices = Vec::new();
