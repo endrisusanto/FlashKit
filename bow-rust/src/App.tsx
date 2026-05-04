@@ -248,8 +248,11 @@ export default function App() {
     const ports: string[] = await invoke("get_samsung_ports");
     if (ports.length > 0) { await Promise.all(ports.map(p => sendAT(false, p))); await delay(2500); }
     const list: string[] = await invoke("get_devices");
-    const active = list.length > 0 ? list : selectedDevices;
-    if (active.length === 0) { appendLog("✗ Perangkat tidak ditemukan."); if (!isSequence) setLoading(false); return; }
+    const active = selectedDevices.length > 0 
+      ? selectedDevices.filter(id => list.includes(id)) 
+      : list;
+
+    if (active.length === 0) { appendLog("✗ Perangkat tidak ditemukan atau tidak terpilih."); if (!isSequence) setLoading(false); return; }
 
     let apkData: string, apkTest: string, apkLang: string;
     try {
@@ -300,7 +303,9 @@ export default function App() {
     // Auto-retry untuk mendapatkan perangkat jika kosong
     for (let i = 0; i < 5; i++) {
       const list: string[] = await invoke("get_devices");
-      active = list.length > 0 ? list : selectedDevices;
+      active = selectedDevices.length > 0 
+        ? selectedDevices.filter(id => list.includes(id)) 
+        : list;
       if (active.length > 0) break;
       if (isSequence) {
         appendLog(`⏳ Menunggu perangkat untuk Setup GBA (Percobaan ${i + 1}/5)...`);
@@ -341,7 +346,9 @@ export default function App() {
     // Auto-retry untuk mendapatkan perangkat jika kosong
     for (let i = 0; i < 5; i++) {
       const list: string[] = await invoke("get_devices");
-      active = list.length > 0 ? list : selectedDevices;
+      active = selectedDevices.length > 0 
+        ? selectedDevices.filter(id => list.includes(id)) 
+        : list;
       if (active.length > 0) break;
       if (isSequence) {
         appendLog(`⏳ Menunggu perangkat untuk WiFi Connect (Percobaan ${i + 1}/5)...`);
@@ -956,7 +963,7 @@ export default function App() {
             <div className={`w-2.5 h-2.5 rounded-full ${devices.length > 0 ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : 'bg-white/10'}`} />
             <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{devices.length} Units Connected</span>
           </div>
-          <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.6.1 &bull; FlashKit By Endri-Pro</span>
+          <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.6.2 &bull; FlashKit By Endri-Pro</span>
         </footer>
 
       </div>
