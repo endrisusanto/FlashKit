@@ -1,17 +1,198 @@
 use tauri::Manager;
 use std::process::Command;
 use std::path::PathBuf;
+use std::process::Stdio;
+use std::io::BufReader;
+use tauri::{Emitter, Window, AppHandle};
+
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+
+// ─────────────────────────────────────────────
+//  Odin Binary Path Resolver
+// ─────────────────────────────────────────────
+
+fn get_odin_binary(app: &AppHandle) -> String {
+    let resource_path = if cfg!(target_os = "windows") {
+        app.path().resolve("../bin/windows/odin4.exe", tauri::path::BaseDirectory::Resource)
+    } else {
+        app.path().resolve("../bin/linux/odin4", tauri::path::BaseDirectory::Resource)
+    };
+
+    match resource_path {
+        Ok(path) => path.to_string_lossy().to_string(),
+        Err(_) => {
+            // Fallback for development mode
+            if cfg!(target_os = "windows") {
+                "bin/windows/odin4.exe".to_string()
+            } else {
+                "bin/linux/odin4".to_string()
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────
+//  Odin Commands (integrated from odin-clone)
+// ─────────────────────────────────────────────
+
+#[tauri::command]
+fn odin_list_devices(app: AppHandle) -> Result<Vec<String>, String> {
+    let binary = get_odin_binary(&app);
+    let mut cmd = Command::new(&binary);
+    cmd.arg("-l");
+
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    let output = cmd.output()
+        .map_err(|e| format!("{}: {}", binary, e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut devices = Vec::new();
+
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("/dev/")
+            || trimmed.contains("bus/usb")
+            || (cfg!(target_os = "windows") && trimmed.contains("COM"))
+        {
+            devices.push(trimmed.to_string());
+        }
+    }
+
+    Ok(devices)
+}
+
+#[derive(serde::Deserialize)]
+pub struct FlashParams {
+    device: String,
+    bl: String,
+    ap: String,
+    cp: String,
+    csc: String,
+    userdata: String,
+}
+
+#[tauri::command]
+async fn odin_flash_device(
+    app: AppHandle,
+    window: Window,
+    params: FlashParams,
+) -> Result<String, String> {
+    let binary = get_odin_binary(&app);
+    let mut cmd = Command::new(&binary);
+
+    // Skip internal MD5 check since we already verified it during file selection
+    cmd.arg("--ignore-md5");
+
+    if !params.bl.is_empty() { cmd.arg("-b").arg(&params.bl); }
+    if !params.ap.is_empty() { cmd.arg("-a").arg(&params.ap); }
+    if !params.cp.is_empty() { cmd.arg("-c").arg(&params.cp); }
+    if !params.csc.is_empty() { cmd.arg("-s").arg(&params.csc); }
+    if !params.userdata.is_empty() { cmd.arg("-u").arg(&params.userdata); }
+
+    if !params.device.is_empty() {
+        cmd.arg("-d").arg(&params.device);
+    }
+
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    let mut child = cmd.spawn().map_err(|e| format!("{}: {}", binary, e))?;
+    let stdout = child.stdout.take().unwrap();
+    let mut reader = BufReader::new(stdout);
+
+    let device_id = params.device.clone();
+    let mut buffer = Vec::new();
+    use std::io::Read;
+    let mut byte_buf = [0u8; 1];
+
+    while reader.read_exact(&mut byte_buf).is_ok() {
+        let b = byte_buf[0];
+        if b == b'\n' || b == b'\r' {
+            if !buffer.is_empty() {
+                let line = String::from_utf8_lossy(&buffer).to_string();
+                let _ = window.emit(&format!("flash-progress-{}", device_id), line);
+                buffer.clear();
+            }
+        } else {
+            buffer.push(b);
+        }
+    }
+
+    let status = child.wait().map_err(|e| e.to_string())?;
+
+    if status.success() {
+        Ok(format!("Flashing {} completed successfully.", params.device))
+    } else {
+        Err(format!("Flashing {} failed with status: {}", params.device, status))
+    }
+}
+
+#[tauri::command]
+async fn odin_check_file(
+    app: AppHandle,
+    window: Window,
+    path: String,
+    slot: String,
+) -> Result<String, String> {
+    let binary = get_odin_binary(&app);
+    let mut cmd = Command::new(&binary);
+    cmd.arg("--md5sum-only").arg("-a").arg(&path);
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    let mut child = cmd.spawn().map_err(|e| format!("{}: {}", binary, e))?;
+
+    if let Some(stdout) = child.stdout.take() {
+        let mut reader = BufReader::new(stdout);
+        let mut buffer = Vec::new();
+
+        // Read byte by byte to handle both \n and \r (odin4 uses \r for progress)
+        use std::io::Read;
+        let mut byte_buf = [0u8; 1];
+        while reader.read_exact(&mut byte_buf).is_ok() {
+            let b = byte_buf[0];
+            if b == b'\n' || b == b'\r' {
+                if !buffer.is_empty() {
+                    let line = String::from_utf8_lossy(&buffer).to_string();
+                    let _ = window.emit(&format!("md5-progress-{}", slot), line);
+                    buffer.clear();
+                }
+            } else {
+                buffer.push(b);
+            }
+        }
+    }
+
+    let status = child.wait().map_err(|e| e.to_string())?;
+
+    if status.success() {
+        Ok("Valid".to_string())
+    } else {
+        Err("Invalid file or MD5 mismatch".to_string())
+    }
+}
+
+// ─────────────────────────────────────────────
+//  ADB / FlashKit Provisioning Commands
+// ─────────────────────────────────────────────
 
 #[tauri::command]
 fn get_resource_path(app: tauri::AppHandle, name: String) -> Result<String, String> {
     let resolver = app.path();
     let resource_dir = resolver.resource_dir().map_err(|e| e.to_string())?;
     let exe_dir = get_exe_dir();
-    
+
     let mut paths = vec![];
-    
+
     // 1. Cek folder resources (Lokasi Standard Tauri)
     paths.push(resource_dir.join(&name));
     paths.push(resource_dir.join("assets").join(&name));
@@ -24,7 +205,7 @@ fn get_resource_path(app: tauri::AppHandle, name: String) -> Result<String, Stri
         paths.push(PathBuf::from("/usr/lib/flashkit/resources/assets").join(&name));
         paths.push(PathBuf::from("/usr/share/flashkit/resources").join(&name));
     }
-    
+
     // 3. Cek folder exe_dir (Lokasi Portable)
     paths.push(exe_dir.join("assets").join(&name));
     paths.push(exe_dir.join("_up_").join("assets").join(&name));
@@ -34,26 +215,38 @@ fn get_resource_path(app: tauri::AppHandle, name: String) -> Result<String, Stri
             return Ok(path.to_string_lossy().to_string());
         }
     }
-    
-    Err(format!("Resource '{}' not found. Jalur resource_dir: {:?}, exe_dir: {:?}", name, resource_dir, exe_dir))
+
+    Err(format!(
+        "Resource '{}' not found. Jalur resource_dir: {:?}, exe_dir: {:?}",
+        name, resource_dir, exe_dir
+    ))
 }
 
 #[tauri::command]
-fn get_device_info(serial: String) -> Result<std::collections::HashMap<String, String>, String> {
+fn get_device_info(
+    serial: String,
+) -> Result<std::collections::HashMap<String, String>, String> {
     let props = vec![
         "ro.product.model",
         "ro.build.PDA",
         "ro.csc.sales_code",
         "ro.csc.country_code",
     ];
-    
+
     let mut info = std::collections::HashMap::new();
     for prop in props {
-        let val = run_adb(vec!["-s".to_string(), serial.clone(), "shell".to_string(), "getprop".to_string(), prop.to_string()])?;
+        let val = run_adb(vec![
+            "-s".to_string(),
+            serial.clone(),
+            "shell".to_string(),
+            "getprop".to_string(),
+            prop.to_string(),
+        ])?;
         info.insert(prop.to_string(), val);
     }
     Ok(info)
 }
+
 fn get_exe_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -82,12 +275,26 @@ fn find_adb() -> String {
     let system_paths: Vec<PathBuf> = {
         let mut paths = vec![];
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
-            paths.push(PathBuf::from(&local).join("Android").join("Sdk").join("platform-tools").join("adb.exe"));
+            paths.push(
+                PathBuf::from(&local)
+                    .join("Android")
+                    .join("Sdk")
+                    .join("platform-tools")
+                    .join("adb.exe"),
+            );
         }
         if let Ok(home) = std::env::var("USERPROFILE") {
-            paths.push(PathBuf::from(&home).join("Android").join("Sdk").join("platform-tools").join("adb.exe"));
+            paths.push(
+                PathBuf::from(&home)
+                    .join("Android")
+                    .join("Sdk")
+                    .join("platform-tools")
+                    .join("adb.exe"),
+            );
         }
-        paths.push(PathBuf::from("C:\\Program Files\\Android\\platform-tools\\adb.exe"));
+        paths.push(PathBuf::from(
+            "C:\\Program Files\\Android\\platform-tools\\adb.exe",
+        ));
         paths
     };
 
@@ -116,7 +323,11 @@ fn get_adb_version() -> String {
     let adb_path = find_adb();
     let output = Command::new(&adb_path).arg("version").output();
     match output {
-        Ok(out) => format!("Path: {}\n{}", adb_path, String::from_utf8_lossy(&out.stdout)),
+        Ok(out) => format!(
+            "Path: {}\n{}",
+            adb_path,
+            String::from_utf8_lossy(&out.stdout)
+        ),
         Err(e) => format!("Error finding ADB: {}", e),
     }
 }
@@ -170,7 +381,11 @@ fn run_adb(args: Vec<String>) -> Result<String, String> {
             return Ok(stdout);
         }
 
-        last_err = if !stderr.is_empty() { stderr.clone() } else { stdout.clone() };
+        last_err = if !stderr.is_empty() {
+            stderr.clone()
+        } else {
+            stdout.clone()
+        };
 
         // If it's a connection error, wait and retry
         if last_err.contains("closed") || last_err.contains("device not found") {
@@ -190,7 +405,8 @@ fn get_samsung_ports() -> Result<Vec<String>, String> {
     let mut samsung_ports = vec![];
     for p in ports {
         if let serialport::SerialPortType::UsbPort(info) = p.port_type {
-            if info.vid == 0x04e8 { // Samsung VID
+            if info.vid == 0x04e8 {
+                // Samsung VID
                 samsung_ports.push(p.port_name);
             }
         }
@@ -211,7 +427,6 @@ fn send_at_command(port_name: String, command: String) -> Result<String, String>
     use std::io::{Read, Write};
     use std::time::Duration;
 
-    // Tingkatkan Baud Rate ke 115200 dan Timeout ke 5 detik
     let mut port = serialport::new(&port_name, 115200)
         .timeout(Duration::from_secs(5))
         .open()
@@ -221,7 +436,6 @@ fn send_at_command(port_name: String, command: String) -> Result<String, String>
     port.write_all(cmd.as_bytes())
         .map_err(|e| format!("Failed to write to port: {}", e))?;
 
-    // Tunggu sedikit agar device sempat memproses
     std::thread::sleep(Duration::from_millis(500));
 
     let mut buffer: Vec<u8> = vec![0; 1024];
@@ -234,6 +448,10 @@ fn send_at_command(port_name: String, command: String) -> Result<String, String>
     }
 }
 
+// ─────────────────────────────────────────────
+//  App Entry Point
+// ─────────────────────────────────────────────
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Fix for Wayland crashes on Linux
@@ -245,7 +463,23 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_devices, run_adb, get_adb_version, get_app_dir, get_serial_ports, send_at_command, get_resource_path, get_samsung_ports, get_device_info])
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            // ADB / Provisioning commands
+            get_devices,
+            run_adb,
+            get_adb_version,
+            get_app_dir,
+            get_serial_ports,
+            send_at_command,
+            get_resource_path,
+            get_samsung_ports,
+            get_device_info,
+            // Odin flash commands
+            odin_list_devices,
+            odin_flash_device,
+            odin_check_file
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

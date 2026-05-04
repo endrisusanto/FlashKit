@@ -10,11 +10,12 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "FlashKit",
-        "width": 1200,
-        "height": 850,
+        "width": 1280,
+        "height": 900,
         "minWidth": 1000,
         "minHeight": 700
       }
@@ -34,7 +35,9 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../assets/*"
+      "../assets/*",
+      "../bin/linux/odin4",
+      "../bin/windows/odin4.exe"
     ]
   }
 }

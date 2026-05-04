@@ -22,9 +22,25 @@
   --win-warning: #f59e0b;
 }
 
+@layer utilities {
+  .gap-10 {
+    gap: calc(var(--spacing) * 5);
+  }
+}
+
+@keyframes flash {
+  0%, 100% { opacity: 0; }
+  10%, 90% { opacity: 0.3; }
+  50% { opacity: 0.8; }
+}
+
+.animate-flash {
+  animation: flash 0.3s ease-in-out;
+}
+
 * {
-  margin: 0;
-  padding: 0;
+  margin: 0px;
+  padding: 3px;
   box-sizing: border-box;
 }
 
