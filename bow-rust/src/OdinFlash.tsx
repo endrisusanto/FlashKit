@@ -167,6 +167,30 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
   }
 
   async function verifyFile(slot: SlotKey, path: string) {
+    const fname = (path.split(/[/\\]/).pop() || "").toUpperCase();
+    
+    // Validasi awalan nama file sesuai slot
+    if (slot === "bl" && !fname.startsWith("BL_")) {
+      alert(`File salah! Slot BL hanya menerima file dengan awalan "BL_"\nFile Anda: ${fname}`);
+      return;
+    }
+    if (slot === "ap" && !fname.startsWith("AP_") && !fname.startsWith("ALL_")) {
+      alert(`File salah! Slot AP hanya menerima file dengan awalan "AP_"\nFile Anda: ${fname}`);
+      return;
+    }
+    if (slot === "cp" && !fname.startsWith("CP_")) {
+      alert(`File salah! Slot CP hanya menerima file dengan awalan "CP_"\nFile Anda: ${fname}`);
+      return;
+    }
+    if (slot === "csc" && !fname.startsWith("CSC_") && !fname.startsWith("HOME_CSC_")) {
+      alert(`File salah! Slot CSC hanya menerima file dengan awalan "CSC_" atau "HOME_CSC_"\nFile Anda: ${fname}`);
+      return;
+    }
+    if (slot === "userdata" && !fname.startsWith("USERDATA_")) {
+      alert(`File salah! Slot USERDATA hanya menerima file dengan awalan "USERDATA_"\nFile Anda: ${fname}`);
+      return;
+    }
+
     setVerifyState(prev => ({
       ...prev,
       [slot]: { text: "Verifying MD5... 0%", progress: 0, verifying: true },

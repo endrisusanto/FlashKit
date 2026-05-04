@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X, Zap } from "lucide-react";
+import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X } from "lucide-react";
 import OdinFlash, { OdinFlashRef } from "./OdinFlash";
 import logo from './assets/logo.png';
 import confetti from 'canvas-confetti';
@@ -30,6 +30,30 @@ const playSuccessSound = () => {
   } catch (e) { console.error("Audio error", e); }
 };
 
+let confettiInterval: any = null;
+
+const startConfettiLoop = () => {
+  if (confettiInterval) clearInterval(confettiInterval);
+  const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 9999 };
+
+  confettiInterval = setInterval(() => {
+    confetti({ ...defaults, particleCount: 40, origin: { x: Math.random(), y: Math.random() - 0.2 } });
+  }, 350);
+
+  const stopConfetti = () => {
+    if (confettiInterval) {
+      clearInterval(confettiInterval);
+      confettiInterval = null;
+    }
+    try { confetti.reset(); } catch (e) {}
+    window.removeEventListener('mousedown', stopConfetti);
+  };
+
+  setTimeout(() => {
+    window.addEventListener('mousedown', stopConfetti);
+  }, 500);
+};
+
 
 
 export default function App() {
@@ -49,7 +73,6 @@ export default function App() {
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [showAdbWarningModal, setShowAdbWarningModal] = useState(false);
   const [failedDevice, setFailedDevice] = useState<string | null>(null);
-  const [showLightning, setShowLightning] = useState(false);
 
   // Master Sequence States
   const [showSplash, setShowSplash] = useState(true);
@@ -77,18 +100,22 @@ export default function App() {
   }, [seqOdin, seqSkipWz, seqGba, seqWifi]);
 
   useEffect(() => {
+    // Pre-warm confetti canvas to prevent first-click lag
+    try { confetti({ particleCount: 0 }); } catch (e) {}
+    
     const t = setTimeout(() => setShowSplash(false), 2000);
     return () => clearTimeout(t);
   }, []);
 
   const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-  const waitForAdb = async (timeoutMs = 180000) => {
+  const waitForAdb = async (timeoutMs = 180000, preFlashDevices: string[] = []) => {
     const startTime = Date.now();
     while (Date.now() - startTime < timeoutMs) {
       try {
-        const list: string[] = await invoke("get_devices");
-        if (list.length > 0) return true;
+        const list: string[] = await invoke<string[]>("get_devices");
+        const newDevices = list.filter(d => !preFlashDevices.includes(d));
+        if (newDevices.length > 0) return true;
       } catch (e) {
         console.error(e);
       }
@@ -321,14 +348,23 @@ export default function App() {
     if (!isSequence) setLoading(false);
   };
 
-  const runMasterSequence = async () => {
+  const runMasterSequence = async (e?: React.MouseEvent) => {
     if (loading) return;
     
-    setShowLightning(true);
-    setTimeout(() => setShowLightning(false), 500);
+    if (e) {
+      const x = e.clientX / window.innerWidth;
+      const y = e.clientY / window.innerHeight;
+      // Tunggu animasi confetti selesai (await) agar tidak frame-drop saat React re-render
+      await confetti({ particleCount: 60, spread: 70, origin: { x, y }, colors: ['#3b82f6', '#a855f7', '#22c55e'] });
+    }
 
     setLoading(true);
+    await new Promise(r => setTimeout(r, 50));
+
     appendLog("==== MEMULAI MASTER SEQUENCE ====");
+
+    let preFlashAdb: string[] = [];
+    try { preFlashAdb = await invoke<string[]>("get_devices"); } catch (e) { }
 
     if (seqOdin) {
       setCurrentStep(0);
@@ -348,7 +384,7 @@ export default function App() {
             appendLog("✓ Odin Flash Selesai.");
             appendLog("⏳ Menunggu perangkat reboot dan terdeteksi ADB (Maksimal 3 Menit)...");
 
-            const adbReady = await waitForAdb(180000);
+            const adbReady = await waitForAdb(180000, preFlashAdb);
             if (!adbReady) {
               appendLog("✗ Timeout: Perangkat tidak terdeteksi oleh ADB setelah 3 menit.");
               appendLog("==== MASTER SEQUENCE DIBATALKAN ====");
@@ -362,6 +398,15 @@ export default function App() {
 
             // Refresh list device di layar agar terpilih untuk tahap selanjutnya
             await refreshDevices();
+            
+            try {
+              const currentAdb = await invoke<string[]>("get_devices");
+              const newlyBooted = currentAdb.filter(d => !preFlashAdb.includes(d));
+              if (newlyBooted.length > 0) {
+                setSelectedDevices(newlyBooted);
+                appendLog(`[Auto] Mengunci proses selanjutnya hanya untuk ${newlyBooted.length} perangkat yang baru di-flash.`);
+              }
+            } catch (e) {}
           }
         }
       }
@@ -388,7 +433,7 @@ export default function App() {
     setCurrentStep(null);
     setLoading(false);
     appendLog("==== MASTER SEQUENCE SELESAI ====");
-    confetti({ particleCount: 200, spread: 100, origin: { y: 0.6 } });
+    startConfettiLoop();
     playSuccessSound();
   };
 
@@ -496,13 +541,6 @@ export default function App() {
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {showLightning && (
-        <div className="fixed inset-0 z-[9999] pointer-events-none flex items-center justify-center">
-          <div className="absolute inset-0 bg-blue-500 opacity-20 animate-flash"></div>
-          <Zap className="w-64 h-64 text-blue-400 drop-shadow-[0_0_100px_rgba(96,165,250,1)] animate-bounce" />
         </div>
       )}
 
@@ -653,7 +691,7 @@ export default function App() {
                       <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqWifi ? 'text-green-400' : 'text-white/40'}`}>WiFi Connect</span>
                     </div>
                   </div>
-                  <button onClick={runMasterSequence} disabled={loading || (!seqOdin && !seqSkipWz && !seqGba && !seqWifi)} className={`w-full mt-2 py-6 rounded-xl transition-all font-black uppercase tracking-widest text-[16px] flex items-center justify-center gap-4 border-2 ${loading ? 'bg-[#111] border-[#333] text-white/40 cursor-not-allowed' : 'bg-white text-black border-white hover:bg-gray-200 disabled:opacity-30'}`}>
+                  <button onClick={(e) => runMasterSequence(e)} disabled={loading || (!seqOdin && !seqSkipWz && !seqGba && !seqWifi)} className={`w-full mt-2 py-6 rounded-xl transition-all font-black uppercase tracking-widest text-[16px] flex items-center justify-center gap-4 border-2 ${loading ? 'bg-[#111] border-[#333] text-white/40 cursor-not-allowed' : 'bg-white text-black border-white hover:bg-gray-200 disabled:opacity-30'}`}>
                     {loading && currentStep !== null ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Play className="w-6 h-6" />}
                     <span>{loading && currentStep !== null ? 'Memproses...' : 'Jalankan Automasi'}</span>
                   </button>
