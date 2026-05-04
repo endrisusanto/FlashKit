@@ -109,7 +109,7 @@ export default function App() {
 
   const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-  const waitForAdb = async (timeoutMs = 180000, preFlashDevices: string[] = []) => {
+  const waitForAdb = async (timeoutMs = 600000, preFlashDevices: string[] = []) => {
     const startTime = Date.now();
     while (Date.now() - startTime < timeoutMs) {
       try {
@@ -382,11 +382,11 @@ export default function App() {
             return;
           } else {
             appendLog("✓ Odin Flash Selesai.");
-            appendLog("⏳ Menunggu perangkat reboot dan terdeteksi ADB (Maksimal 3 Menit)...");
+            appendLog("⏳ Menunggu perangkat reboot dan terdeteksi ADB (Maksimal 10 Menit)...");
 
-            const adbReady = await waitForAdb(180000, preFlashAdb);
+            const adbReady = await waitForAdb(600000, preFlashAdb);
             if (!adbReady) {
-              appendLog("✗ Timeout: Perangkat tidak terdeteksi oleh ADB setelah 3 menit.");
+              appendLog("✗ Timeout: Perangkat tidak terdeteksi oleh ADB setelah 10 menit.");
               appendLog("==== MASTER SEQUENCE DIBATALKAN ====");
               setLoading(false);
               setCurrentStep(null);
