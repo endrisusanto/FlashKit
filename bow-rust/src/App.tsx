@@ -367,10 +367,13 @@ export default function App() {
 
     await Promise.all(active.map(async (dev) => {
       try {
-        appendLog(`[${dev}] Mengirim profil WiFi...`);
+        appendLog(`[${dev}] Menyiapkan utilitas WiFi...`);
         await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] });
+        // Clean install to avoid signature mismatch
+        try { await invoke("run_adb", { args: ["-s", dev, "shell", "pm uninstall com.android.tradefed.utils.wifi"] }); } catch { }
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] });
-        await delay(500);
+        await delay(2000); 
+        appendLog(`[${dev}] Mengirim profil WiFi...`);
 
         const addCmd = password
           ? `am instrument -e method addWpaPskNetwork -e ssid "${ssid}" -e psk "${password}" -e hidden true -w com.android.tradefed.utils.wifi/.WifiUtil`
@@ -965,7 +968,7 @@ export default function App() {
             <div className={`w-2.5 h-2.5 rounded-full ${devices.length > 0 ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : 'bg-white/10'}`} />
             <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{devices.length} Units Connected</span>
           </div>
-          <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.6.3 &bull; FlashKit By Endri-Pro</span>
+          <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.6.4 &bull; FlashKit By Endri-Pro</span>
         </footer>
 
       </div>
