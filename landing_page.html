@@ -3,92 +3,83 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FlashKit | Ultimate Bulk Provisioning Tool</title>
+    <title>FlashKit | Professional Samsung Bulk Provisioning</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Outfit:wght@300;600;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;500;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-primary: #0a0a0a;
-            --bg-secondary: #111111;
-            --accent-blue: #3b82f6;
-            --accent-purple: #a855f7;
-            --accent-green: #22c55e;
-            --text-main: #ffffff;
-            --text-dim: rgba(255, 255, 255, 0.4);
-            --border-color: rgba(255, 255, 255, 0.08);
-            --glow-blue: 0 0 20px rgba(59, 130, 246, 0.3);
+            --primary: #2563eb;
+            --primary-glow: rgba(37, 99, 235, 0.4);
+            --danger: #ef4444;
+            --danger-glow: rgba(239, 68, 68, 0.4);
+            --bg: #050505;
+            --card-bg: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.08);
+            --text: #ffffff;
+            --text-muted: #888888;
         }
 
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: 'Inter', sans-serif;
-            border-radius: 0 !important; /* Industrial Sharp Edges */
+            border-radius: 0 !important; /* Sharp industrial design */
         }
 
         body {
-            background-color: var(--bg-primary);
-            color: var(--text-main);
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Plus Jakarta Sans', sans-serif;
             overflow-x: hidden;
-            line-height: 1.6;
-            -webkit-font-smoothing: antialiased;
+            scroll-behavior: smooth;
         }
 
-        /* ── NAVBAR ── */
+        /* ── UTILITIES ── */
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+        .gradient-text {
+            background: linear-gradient(135deg, #fff 0%, #3b82f6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        /* ── NAVIGATION ── */
         nav {
-            height: 80px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 8%;
-            border-bottom: 1px solid var(--border-color);
-            background: rgba(10, 10, 10, 0.8);
-            backdrop-filter: blur(20px);
             position: fixed;
-            top: 0;
-            width: 100%;
+            top: 0; width: 100%;
+            height: 80px;
+            background: rgba(5,5,5,0.8);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
             z-index: 1000;
-        }
-
-        .logo {
-            font-family: 'Outfit', sans-serif;
-            font-weight: 900;
-            font-size: 24px;
-            letter-spacing: 0.2em;
-            text-transform: uppercase;
-        }
-
-        .logo span {
-            color: var(--accent-blue);
-        }
-
-        .nav-links {
             display: flex;
-            gap: 40px;
-        }
-
-        .nav-links a {
-            color: var(--text-dim);
-            text-decoration: none;
-            font-size: 11px;
-            font-weight: 900;
-            text-transform: uppercase;
-            letter-spacing: 0.2em;
-            transition: 0.3s;
-        }
-
-        .nav-links a:hover {
-            color: var(--text-main);
-        }
-
-        /* ── HERO SECTION ── */
-        .hero {
-            padding: 200px 8% 100px;
-            display: flex;
-            flex-direction: column;
             align-items: center;
+        }
+
+        .nav-content {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo { font-weight: 800; font-size: 20px; letter-spacing: 2px; }
+        .logo span { color: var(--primary); }
+
+        .nav-links { display: flex; gap: 32px; }
+        .nav-links a {
+            text-decoration: none;
+            color: var(--text-muted);
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            transition: color 0.3s;
+        }
+        .nav-links a:hover { color: var(--text); }
+
+        /* ── HERO ── */
+        .hero {
+            padding: 180px 0 100px;
             text-align: center;
             position: relative;
         }
@@ -96,295 +87,278 @@
         .hero::before {
             content: '';
             position: absolute;
-            top: 10%;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 600px;
-            height: 600px;
-            background: radial-gradient(circle, rgba(59, 130, 246, 0.1) 0%, transparent 70%);
-            filter: blur(60px);
+            top: 0; left: 50%; transform: translateX(-50%);
+            width: 80%; height: 500px;
+            background: radial-gradient(circle, var(--primary-glow) 0%, transparent 70%);
+            filter: blur(80px);
             z-index: -1;
         }
 
-        .badge {
-            background: rgba(59, 130, 246, 0.1);
-            border: 1px solid rgba(59, 130, 246, 0.2);
-            padding: 8px 20px;
-            font-size: 10px;
-            font-weight: 900;
-            text-transform: uppercase;
-            letter-spacing: 0.3em;
-            color: var(--accent-blue);
-            margin-bottom: 30px;
+        .badge-v {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--border);
+            padding: 8px 16px;
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 24px;
             display: inline-block;
         }
 
-        h1 {
-            font-family: 'Outfit', sans-serif;
-            font-size: clamp(40px, 8vw, 90px);
-            font-weight: 900;
-            line-height: 0.9;
+        .hero h1 {
+            font-size: clamp(40px, 7vw, 84px);
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 24px;
             text-transform: uppercase;
-            letter-spacing: -0.02em;
-            margin-bottom: 30px;
         }
 
         .hero p {
-            max-width: 600px;
-            color: var(--text-dim);
-            font-size: 18px;
-            margin-bottom: 50px;
+            font-size: 20px;
+            color: var(--text-muted);
+            max-width: 700px;
+            margin: 0 auto 48px;
         }
 
-        .cta-group {
-            display: flex;
-            gap: 20px;
+        .hero-mockup {
+            margin-top: 60px;
+            border: 1px solid var(--border);
+            padding: 12px;
+            background: rgba(255,255,255,0.02);
+            box-shadow: 0 40px 100px rgba(0,0,0,0.6);
+            transform: perspective(1000px) rotateX(5deg);
+            transition: transform 0.5s;
         }
-
-        .btn {
-            padding: 18px 45px;
-            font-size: 12px;
-            font-weight: 900;
-            text-transform: uppercase;
-            letter-spacing: 0.2em;
-            cursor: pointer;
-            transition: 0.4s;
-            border: none;
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .btn-primary {
-            background: var(--text-main);
-            color: var(--bg-primary);
-        }
-
-        .btn-primary:hover {
-            background: var(--accent-blue);
-            color: white;
-            box-shadow: 0 10px 30px rgba(59, 130, 246, 0.4);
-        }
-
-        .btn-outline {
-            background: transparent;
-            border: 1px solid var(--border-color);
-            color: var(--text-main);
-        }
-
-        .btn-outline:hover {
-            border-color: var(--text-main);
-        }
-
-        /* ── MOCKUP AREA ── */
-        .mockup-container {
-            width: 90%;
-            max-width: 1200px;
-            margin: 50px auto;
-            position: relative;
-            border: 1px solid var(--border-color);
-            padding: 10px;
-            background: var(--bg-secondary);
-            box-shadow: 0 50px 100px rgba(0,0,0,0.5);
-        }
-
-        .mockup-container img {
-            width: 100%;
-            display: block;
-        }
+        .hero-mockup:hover { transform: perspective(1000px) rotateX(0deg); }
+        .hero-mockup img { width: 100%; display: block; }
 
         /* ── FEATURES ── */
-        .features {
-            padding: 100px 8%;
-            display: grid;
-            grid-template-cols: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 30px;
-        }
-
-        .feature-card {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            padding: 50px;
-            transition: 0.4s;
-        }
-
-        .feature-card:hover {
-            border-color: rgba(255,255,255,0.2);
-            transform: translateY(-10px);
-        }
-
-        .f-icon {
-            font-size: 30px;
-            margin-bottom: 30px;
+        .section-tag {
+            color: var(--primary);
+            font-weight: 800;
+            font-size: 12px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            margin-bottom: 16px;
             display: block;
         }
 
-        .feature-card h3 {
-            font-family: 'Outfit', sans-serif;
-            font-size: 24px;
-            margin-bottom: 20px;
-            text-transform: uppercase;
+        .features { padding: 100px 0; }
+        .grid-3 {
+            display: grid;
+            grid-template-cols: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin-top: 48px;
         }
 
-        .feature-card p {
-            color: var(--text-dim);
-            font-size: 14px;
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            padding: 40px;
+            transition: 0.3s;
+            text-align: left;
         }
+        .card:hover { border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); }
 
-        /* ── MASTER SECTION ── */
-        .master-promo {
-            margin: 100px 8%;
-            background: linear-gradient(135deg, #111, #0a0a0a);
-            border: 1px solid var(--border-color);
-            padding: 100px;
+        .card-icon { font-size: 32px; margin-bottom: 24px; display: block; }
+        .card h3 { font-size: 24px; font-weight: 700; margin-bottom: 16px; text-transform: uppercase; }
+        .card p { color: var(--text-muted); font-size: 15px; line-height: 1.6; }
+
+        /* ── DOCUMENTATION ── */
+        .docs { padding: 100px 0; background: #080808; border-top: 1px solid var(--border); }
+        .doc-step {
             display: flex;
+            gap: 60px;
             align-items: center;
-            gap: 100px;
+            margin-bottom: 100px;
+        }
+        .doc-step:nth-child(even) { flex-direction: row-reverse; }
+
+        .doc-info { flex: 1; }
+        .doc-info h2 { font-size: 36px; margin-bottom: 24px; text-transform: uppercase; }
+        .doc-visual { flex: 1.2; border: 1px solid var(--border); padding: 10px; background: #000; }
+        .doc-visual img { width: 100%; }
+
+        .code-block {
+            background: #000;
+            padding: 24px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            border-left: 2px solid var(--primary);
+            color: #ccc;
+            margin-top: 24px;
         }
 
-        .master-text {
-            flex: 1;
+        /* ── DOWNLOAD ── */
+        .download { padding: 120px 0; text-align: center; }
+        .download-grid {
+            display: grid;
+            grid-template-cols: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+            margin-top: 60px;
         }
+        .dl-card {
+            background: #111;
+            padding: 48px;
+            border: 1px solid var(--border);
+            transition: 0.3s;
+        }
+        .dl-card:hover { border-color: var(--primary); box-shadow: 0 0 30px var(--primary-glow); }
+        .dl-card h4 { font-size: 20px; margin-bottom: 8px; }
+        .dl-card .ext { color: var(--text-muted); font-size: 12px; margin-bottom: 32px; display: block; }
 
-        .master-text h2 {
-            font-family: 'Outfit', sans-serif;
-            font-size: 45px;
-            line-height: 1.1;
-            margin-bottom: 30px;
+        .btn-dl {
+            background: var(--primary);
+            color: white;
+            text-decoration: none;
+            padding: 16px 32px;
+            font-weight: 800;
+            font-size: 13px;
             text-transform: uppercase;
+            display: inline-block;
+            transition: 0.3s;
         }
-
-        .master-text p {
-            color: var(--text-dim);
-            margin-bottom: 40px;
-        }
-
-        .sequence-dots {
-            display: flex;
-            gap: 15px;
-            margin-bottom: 40px;
-        }
-
-        .dot {
-            height: 4px;
-            width: 60px;
-            background: var(--border-color);
-        }
-
-        .dot.active {
-            background: var(--accent-blue);
-            box-shadow: 0 0 10px var(--accent-blue);
-        }
+        .btn-dl:hover { background: #3b82f6; transform: translateY(-3px); }
 
         /* ── FOOTER ── */
         footer {
-            padding: 100px 8% 50px;
-            border-top: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-end;
+            padding: 80px 0;
+            border-top: 1px solid var(--border);
+            text-align: center;
         }
+        .footer-logo { opacity: 0.2; font-size: 24px; margin-bottom: 24px; }
+        .credits { font-size: 12px; color: var(--text-muted); }
 
-        .f-left h4 {
-            font-size: 11px;
-            font-weight: 900;
-            text-transform: uppercase;
-            letter-spacing: 0.3em;
-            color: var(--text-dim);
-            margin-bottom: 20px;
-        }
-
-        .copyright {
-            font-size: 11px;
-            color: var(--text-dim);
-        }
-
-        @media (max-width: 1024px) {
-            .master-promo {
-                flex-direction: column;
-                padding: 60px;
-                text-align: center;
-            }
-            .sequence-dots {
-                justify-content: center;
-            }
+        @media (max-width: 768px) {
+            .doc-step { flex-direction: column !important; text-align: center; gap: 40px; }
+            .nav-links { display: none; }
         }
     </style>
 </head>
 <body>
 
     <nav>
-        <div class="logo">FLASH<span>KIT</span></div>
-        <div class="nav-links">
-            <a href="#features">Fitur</a>
-            <a href="#master">Master Engine</a>
-            <a href="#">Dokumentasi</a>
+        <div class="container nav-content">
+            <div class="logo">FLASH<span>KIT</span></div>
+            <div class="nav-links">
+                <a href="#features">Fitur</a>
+                <a href="#how-it-works">Cara Pakai</a>
+                <a href="#download">Download</a>
+            </div>
+            <a href="#download" class="btn-dl" style="padding: 10px 20px; font-size: 11px;">Get v1.6.2</a>
         </div>
-        <button class="btn btn-primary" style="padding: 12px 25px; font-size: 10px;">Unduh Sekarang</button>
     </nav>
 
     <header class="hero">
-        <div class="badge">Industrial Provisioning v1.5.0</div>
-        <h1>Power to the <br> <span>Fleet Manager</span></h1>
-        <p>Alat provisioning massal tercepat untuk perangkat Samsung. Selesaikan konfigurasi ratusan perangkat dalam hitungan menit, bukan jam.</p>
-        <div class="cta-group">
-            <button class="btn btn-primary">Mulai Sekarang</button>
-            <button class="btn btn-outline">Lihat Demo</button>
+        <div class="container">
+            <div class="badge-v">INDUSTRIAL GRADE RELEASE V1.6.2</div>
+            <h1>Automate Your <br> <span class="gradient-text">Samsung Fleet</span></h1>
+            <p>Alat provisioning massal yang dirancang untuk kecepatan ekstrem, keamanan hardware, dan skalabilitas industri.</p>
+            <div style="display: flex; gap: 16px; justify-content: center;">
+                <a href="#download" class="btn-dl">Download Sekarang</a>
+                <a href="#how-it-works" class="btn-dl" style="background: transparent; border: 1px solid var(--border);">Lihat Panduan</a>
+            </div>
+            
+            <div class="hero-mockup">
+                <img src="flashkit_v162_landing_mockup.png" alt="FlashKit Main Dashboard">
+            </div>
         </div>
     </header>
 
-    <section class="mockup-container">
-        <img src="flashkit_app_mockup_1777375309646.png" alt="FlashKit Dashboard Mockup">
-    </section>
-
     <section class="features" id="features">
-        <div class="feature-card">
-            <span class="f-icon">⚡</span>
-            <h3>Skip Wizard</h3>
-            <p>Lewati proses aktivasi yang membosankan secara otomatis. Satu klik untuk mematikan setup wizard Samsung & Google.</p>
-        </div>
-        <div class="feature-card">
-            <span class="f-icon">🛡️</span>
-            <h3>Setup GBA</h3>
-            <p>Persiapkan prekondisi keamanan dan ADB verifier dalam skala besar dengan keandalan protokol industrial.</p>
-        </div>
-        <div class="feature-card">
-            <span class="f-icon">🌐</span>
-            <h3>WiFi Sync</h3>
-            <p>Hubungkan seluruh armada perangkat Anda ke jaringan WiFi target secara sinkron menggunakan WifiUtil Engine.</p>
+        <div class="container">
+            <span class="section-tag">Powerful Engine</span>
+            <h2 style="font-size: 48px; text-transform: uppercase;">Built for Scale</h2>
+            
+            <div class="grid-3">
+                <div class="card">
+                    <span class="card-icon">⚡</span>
+                    <h3>Master Sequence</h3>
+                    <p>Otomasi berantai tanpa intervensi. Jalankan Odin Flash, Skip Setup Wizard, Setup GBA, dan Koneksi WiFi dalam satu antrian cerdas.</p>
+                </div>
+                <div class="card" style="border-color: var(--danger-glow);">
+                    <span class="card-icon">🛑</span>
+                    <h3>Emergency Stop</h3>
+                    <p>Keamanan hardware di atas segalanya. Kill switch instan untuk memutus komunikasi Odin & ADB jika terjadi anomali pada perangkat.</p>
+                </div>
+                <div class="card">
+                    <span class="card-icon">🔒</span>
+                    <h3>Shared Busy State</h3>
+                    <p>Proteksi multi-instance. Sinkronisasi status perangkat antar jendela FlashKit untuk mencegah tabrakan perintah pada port yang sama.</p>
+                </div>
+            </div>
         </div>
     </section>
 
-    <section class="master-promo" id="master">
-        <div class="master-text">
-            <h2>Master Sequence <br> Automation</h2>
-            <div class="sequence-dots">
-                <div class="dot active"></div>
-                <div class="dot active"></div>
-                <div class="dot active"></div>
+    <section class="docs" id="how-it-works">
+        <div class="container">
+            <span class="section-tag">Documentation</span>
+            
+            <!-- Step 1: Odin -->
+            <div class="doc-step">
+                <div class="doc-info">
+                    <h2>01. Odin Flash Engine</h2>
+                    <p>Siapkan firmware Samsung Anda. FlashKit mendukung pemuatan file BL, AP, CP, CSC, dan USERDATA secara massal dengan verifikasi checksum otomatis.</p>
+                    <div class="code-block">
+                        // Tips: Pastikan driver Samsung Mobile USB terinstal.<br>
+                        // FlashKit akan mendeteksi perangkat di mode Download secara otomatis.
+                    </div>
+                </div>
+                <div class="doc-visual">
+                    <img src="flashkit_odin_mockup.png" alt="Odin Engine Interface">
+                </div>
             </div>
-            <p>Rancang alur kerja kustom Anda. Aktifkan Skip WZ, Setup GBA, dan WiFi Sync dalam satu urutan eksekusi yang cerdas dengan simpanan preset cerdas.</p>
-            <button class="btn btn-outline">Pelajari Master Engine</button>
+
+            <!-- Step 2: Automation -->
+            <div class="doc-step">
+                <div class="doc-info">
+                    <h2>02. Master Automation</h2>
+                    <p>Setelah flashing selesai, FlashKit akan menunggu perangkat reboot dan masuk ke mode ADB. Secara otomatis menjalankan exploit AT untuk mengaktifkan debug dan melewati Setup Wizard.</p>
+                    <div class="code-block">
+                        > executing exploit: AT+USBDEBUG=1<br>
+                        > status: ADB_ENABLED_SUCCESS
+                    </div>
+                </div>
+                <div class="doc-visual">
+                    <img src="flashkit_v162_landing_mockup.png" alt="Automation Dashboard">
+                </div>
+            </div>
         </div>
-        <div style="flex: 1; border: 1px solid var(--border-color); padding: 40px; background: rgba(255,255,255,0.02);">
-            <div style="font-family: monospace; font-size: 12px; color: var(--accent-blue);">
-                > initializing master_engine...<br>
-                > scanning connected devices [12]<br>
-                > executing sequence_01: skip_wizard... [OK]<br>
-                > executing sequence_02: setup_gba... [OK]<br>
-                > executing sequence_03: wifi_sync... [OK]<br>
-                > fleet status: READY_STABLE
+    </section>
+
+    <section class="download" id="download">
+        <div class="container">
+            <span class="section-tag">Deployment</span>
+            <h2 style="font-size: 48px; text-transform: uppercase;">Ready for Production</h2>
+            
+            <div class="download-grid">
+                <div class="dl-card">
+                    <h4>Linux Debian / Ubuntu</h4>
+                    <span class="ext">.DEB Package</span>
+                    <a href="#" class="btn-dl">Download .deb</a>
+                </div>
+                <div class="dl-card">
+                    <h4>Fedora / RedHat</h4>
+                    <span class="ext">.RPM Package</span>
+                    <a href="#" class="btn-dl">Download .rpm</a>
+                </div>
+                <div class="dl-card">
+                    <h4>Windows 10/11</h4>
+                    <span class="ext">.EXE Installer</span>
+                    <a href="#" class="btn-dl" style="opacity: 0.5; pointer-events: none;">Coming Soon</a>
+                </div>
+            </div>
+
+            <div style="margin-top: 60px; color: var(--text-muted); font-size: 14px;">
+                Dibuat dengan Rust & Tauri untuk performa dan keamanan memori maksimal.
             </div>
         </div>
     </section>
 
     <footer>
-        <div class="f-left">
-            <h4>FlashKit Industrial</h4>
-            <p class="copyright">&copy; 2026 FlashKit Engine. Didesain untuk performa ekstrem.</p>
-        </div>
-        <div class="f-right">
-            <div class="logo" style="opacity: 0.2; filter: grayscale(1);">FLASHKIT</div>
+        <div class="container">
+            <div class="footer-logo logo">FLASH<span>KIT</span></div>
+            <p class="credits">FlashKit Industrial Provisioning Engine &bull; Developed by Endri-Pro &bull; &copy; 2026</p>
         </div>
     </footer>
 
