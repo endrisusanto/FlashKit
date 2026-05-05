@@ -968,7 +968,7 @@ export default function App() {
             <div className={`w-2.5 h-2.5 rounded-full ${devices.length > 0 ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : 'bg-white/10'}`} />
             <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{devices.length} Units Connected</span>
           </div>
-          <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.6.4 &bull; FlashKit By Endri-Pro</span>
+          <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.6.5 &bull; FlashKit By Endri-Pro</span>
         </footer>
 
       </div>

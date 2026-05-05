@@ -89,20 +89,33 @@
 /* Device Section */
 .devices-section {
   display: flex;
-  gap: 12px;
+  gap: 16px;
   overflow-x: auto;
-  padding-bottom: 8px;
-  min-height: 90px;
-  margin-bottom: 1vh;
+  padding: 4px 4px 12px 4px;
+  min-height: 100px;
+  margin-bottom: 1.5vh;
   width: 100%;
+  scrollbar-width: thin;
+  scrollbar-color: var(--primary) transparent;
+}
+
+.devices-section::-webkit-scrollbar {
+  height: 6px;
+}
+.devices-section::-webkit-scrollbar-track {
+  background: transparent;
+}
+.devices-section::-webkit-scrollbar-thumb {
+  background: var(--primary);
+  border-radius: 10px;
 }
 
 .device-skeleton {
   background: transparent;
   border: 2px dashed rgba(255,255,255,0.1);
   border-radius: 10px;
-  min-width: 200px;
-  flex: 1;
+  min-width: 260px;
+  flex: 0 0 auto;
   height: 100%;
   opacity: 0.5;
   animation: pulse-skeleton 2s infinite ease-in-out;
@@ -116,9 +129,9 @@
 .device-card {
   background: var(--bg-card);
   border-radius: 10px;
-  min-width: 200px;
-  flex: 1;
-  min-height: 90px;
+  min-width: 260px;
+  flex: 0 0 auto;
+  min-height: 95px;
   height: 100%;
   display: flex;
   cursor: pointer;
