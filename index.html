@@ -3,57 +3,53 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FlashKit | Professional Samsung Bulk Provisioning</title>
+    <title>FlashKit | The New Standard in Bulk Provisioning</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;500;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
     <style>
         :root {
-            --primary: #2563eb;
-            --primary-glow: rgba(37, 99, 235, 0.4);
-            --danger: #ef4444;
-            --danger-glow: rgba(239, 68, 68, 0.4);
-            --bg: #050505;
-            --card-bg: rgba(255, 255, 255, 0.03);
-            --border: rgba(255, 255, 255, 0.08);
-            --text: #ffffff;
-            --text-muted: #888888;
+            --bg: #ffffff;
+            --text: #1d1d1f;
+            --text-secondary: #86868b;
+            --primary: #0071e3;
+            --primary-hover: #0077ed;
+            --danger: #ff3b30;
+            --card-bg: #f5f5f7;
+            --border: #d2d2d7;
+            --font-main: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
 
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            border-radius: 0 !important; /* Sharp industrial design */
+            border-radius: 20px; /* Soft Rounded Corners for Apple Style */
         }
 
         body {
-            background: var(--bg);
+            background-color: var(--bg);
             color: var(--text);
-            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-family: var(--font-main);
+            line-height: 1.5;
             overflow-x: hidden;
-            scroll-behavior: smooth;
+            -webkit-font-smoothing: antialiased;
         }
 
-        /* ── UTILITIES ── */
-        .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
-        .gradient-text {
-            background: linear-gradient(135deg, #fff 0%, #3b82f6 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
+        .container { max-width: 1100px; margin: 0 auto; padding: 0 22px; }
 
         /* ── NAVIGATION ── */
         nav {
             position: fixed;
             top: 0; width: 100%;
-            height: 80px;
-            background: rgba(5,5,5,0.8);
-            backdrop-filter: blur(12px);
-            border-bottom: 1px solid var(--border);
-            z-index: 1000;
+            height: 48px;
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: saturate(180%) blur(20px);
+            z-index: 9999;
             display: flex;
             align-items: center;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            border-radius: 0;
         }
 
         .nav-content {
@@ -63,175 +59,191 @@
             align-items: center;
         }
 
-        .logo { font-weight: 800; font-size: 20px; letter-spacing: 2px; }
-        .logo span { color: var(--primary); }
-
-        .nav-links { display: flex; gap: 32px; }
+        .logo { 
+            font-weight: 600; 
+            font-size: 17px; 
+            letter-spacing: -0.01em; 
+            border-radius: 0;
+        }
+        
+        .nav-links { display: flex; gap: 30px; border-radius: 0; }
         .nav-links a {
             text-decoration: none;
-            color: var(--text-muted);
-            font-size: 13px;
-            font-weight: 600;
-            text-transform: uppercase;
-            transition: color 0.3s;
+            color: var(--text);
+            font-size: 12px;
+            font-weight: 400;
+            opacity: 0.8;
+            transition: opacity 0.3s;
         }
-        .nav-links a:hover { color: var(--text); }
+        .nav-links a:hover { opacity: 1; }
 
         /* ── HERO ── */
         .hero {
-            padding: 180px 0 100px;
+            padding: 120px 0 60px;
             text-align: center;
-            position: relative;
+            background: radial-gradient(circle at center, #f0f7ff 0%, #ffffff 70%);
+            border-radius: 0;
         }
 
-        .hero::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 50%; transform: translateX(-50%);
-            width: 80%; height: 500px;
-            background: radial-gradient(circle, var(--primary-glow) 0%, transparent 70%);
-            filter: blur(80px);
-            z-index: -1;
-        }
-
-        .badge-v {
-            background: rgba(255,255,255,0.05);
-            border: 1px solid var(--border);
-            padding: 8px 16px;
-            font-size: 11px;
-            font-weight: 700;
-            color: var(--primary);
-            margin-bottom: 24px;
-            display: inline-block;
-        }
-
-        .hero h1 {
-            font-size: clamp(40px, 7vw, 84px);
-            font-weight: 800;
-            line-height: 1.1;
-            margin-bottom: 24px;
-            text-transform: uppercase;
-        }
-
-        .hero p {
-            font-size: 20px;
-            color: var(--text-muted);
-            max-width: 700px;
-            margin: 0 auto 48px;
-        }
-
-        .hero-mockup {
-            margin-top: 60px;
-            border: 1px solid var(--border);
-            padding: 12px;
-            background: rgba(255,255,255,0.02);
-            box-shadow: 0 40px 100px rgba(0,0,0,0.6);
-            transform: perspective(1000px) rotateX(5deg);
-            transition: transform 0.5s;
-        }
-        .hero-mockup:hover { transform: perspective(1000px) rotateX(0deg); }
-        .hero-mockup img { width: 100%; display: block; }
-
-        /* ── FEATURES ── */
-        .section-tag {
-            color: var(--primary);
-            font-weight: 800;
-            font-size: 12px;
-            letter-spacing: 3px;
-            text-transform: uppercase;
-            margin-bottom: 16px;
+        .badge-new {
+            color: #bf4800;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 15px;
             display: block;
         }
 
-        .features { padding: 100px 0; }
+        .hero h1 {
+            font-size: clamp(48px, 8vw, 80px);
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            line-height: 1.05;
+            margin-bottom: 20px;
+        }
+
+        .hero h1 span {
+            background: linear-gradient(90deg, #0071e3, #a855f7, #ff2d55);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero p {
+            font-size: 24px;
+            font-weight: 400;
+            color: var(--text-secondary);
+            max-width: 800px;
+            margin: 0 auto 40px;
+        }
+
+        .btn-group { display: flex; gap: 15px; justify-content: center; }
+        
+        .btn {
+            padding: 12px 28px;
+            font-size: 17px;
+            font-weight: 400;
+            text-decoration: none;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: white;
+        }
+        .btn-primary:hover {
+            background-color: var(--primary-hover);
+            transform: scale(1.02);
+        }
+
+        .btn-link {
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .btn-link:hover { text-decoration: underline; }
+
+        /* ── MOCKUP ── */
+        .hero-mockup {
+            margin-top: 60px;
+            max-width: 900px;
+            margin-left: auto;
+            margin-right: auto;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.12);
+            border-radius: 30px;
+            overflow: hidden;
+            background: #fff;
+        }
+        .hero-mockup img { width: 100%; display: block; border-radius: 0; }
+
+        /* ── FEATURES GRID ── */
+        .features { padding: 100px 0; border-radius: 0; }
         .grid-3 {
             display: grid;
-            grid-template-cols: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 24px;
-            margin-top: 48px;
+            grid-template-cols: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 30px;
         }
 
-        .card {
+        .feature-card {
             background: var(--card-bg);
-            border: 1px solid var(--border);
-            padding: 40px;
-            transition: 0.3s;
-            text-align: left;
+            padding: 50px;
+            text-align: center;
+            transition: transform 0.4s ease;
         }
-        .card:hover { border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); }
+        .feature-card:hover { transform: scale(1.01); }
 
-        .card-icon { font-size: 32px; margin-bottom: 24px; display: block; }
-        .card h3 { font-size: 24px; font-weight: 700; margin-bottom: 16px; text-transform: uppercase; }
-        .card p { color: var(--text-muted); font-size: 15px; line-height: 1.6; }
+        .feature-card h3 { font-size: 28px; font-weight: 600; margin-bottom: 15px; letter-spacing: -0.01em; }
+        .feature-card p { font-size: 17px; color: var(--text-secondary); line-height: 1.4; }
 
-        /* ── DOCUMENTATION ── */
-        .docs { padding: 100px 0; background: #080808; border-top: 1px solid var(--border); }
-        .doc-step {
+        /* ── FOCUS SECTION ── */
+        .focus-section {
+            padding: 100px 0;
+            background-color: #000;
+            color: #fff;
+            text-align: center;
+            border-radius: 0;
+        }
+        .focus-section h2 { font-size: 56px; font-weight: 700; margin-bottom: 20px; letter-spacing: -0.02em; }
+        .focus-section p { font-size: 21px; color: #a1a1a6; max-width: 700px; margin: 0 auto 60px; }
+
+        /* ── SAFETY BANNER ── */
+        .safety-banner {
+            margin: 60px auto;
+            background: linear-gradient(135deg, #fff5f5 0%, #ffffff 100%);
+            border: 1px solid #fed7d7;
+            padding: 60px;
             display: flex;
-            gap: 60px;
             align-items: center;
-            margin-bottom: 100px;
+            gap: 40px;
+            max-width: 1000px;
         }
-        .doc-step:nth-child(even) { flex-direction: row-reverse; }
+        .safety-icon { font-size: 60px; }
+        .safety-text h4 { color: var(--danger); font-size: 14px; font-weight: 700; text-transform: uppercase; margin-bottom: 10px; }
+        .safety-text h3 { font-size: 32px; font-weight: 600; margin-bottom: 15px; }
 
-        .doc-info { flex: 1; }
-        .doc-info h2 { font-size: 36px; margin-bottom: 24px; text-transform: uppercase; }
-        .doc-visual { flex: 1.2; border: 1px solid var(--border); padding: 10px; background: #000; }
-        .doc-visual img { width: 100%; }
-
-        .code-block {
-            background: #000;
-            padding: 24px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 14px;
-            border-left: 2px solid var(--primary);
-            color: #ccc;
-            margin-top: 24px;
-        }
-
-        /* ── DOWNLOAD ── */
-        .download { padding: 120px 0; text-align: center; }
-        .download-grid {
+        /* ── DOWNLOADS ── */
+        .download-section { padding: 100px 0; text-align: center; border-radius: 0; }
+        .dl-grid {
             display: grid;
-            grid-template-cols: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 24px;
-            margin-top: 60px;
+            grid-template-cols: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 20px;
+            margin-top: 50px;
         }
         .dl-card {
-            background: #111;
-            padding: 48px;
             border: 1px solid var(--border);
-            transition: 0.3s;
+            padding: 40px;
+            transition: border-color 0.3s;
         }
-        .dl-card:hover { border-color: var(--primary); box-shadow: 0 0 30px var(--primary-glow); }
-        .dl-card h4 { font-size: 20px; margin-bottom: 8px; }
-        .dl-card .ext { color: var(--text-muted); font-size: 12px; margin-bottom: 32px; display: block; }
-
-        .btn-dl {
-            background: var(--primary);
-            color: white;
+        .dl-card:hover { border-color: var(--primary); }
+        .dl-card h5 { font-size: 19px; font-weight: 600; margin-bottom: 5px; }
+        .dl-card .ver { font-size: 12px; color: var(--text-secondary); margin-bottom: 25px; display: block; }
+        .dl-btn {
+            background: #000;
+            color: #fff;
             text-decoration: none;
-            padding: 16px 32px;
-            font-weight: 800;
-            font-size: 13px;
-            text-transform: uppercase;
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 500;
             display: inline-block;
-            transition: 0.3s;
+            border-radius: 40px;
         }
-        .btn-dl:hover { background: #3b82f6; transform: translateY(-3px); }
 
         /* ── FOOTER ── */
         footer {
-            padding: 80px 0;
+            padding: 60px 0;
+            background: var(--card-bg);
             border-top: 1px solid var(--border);
-            text-align: center;
+            font-size: 12px;
+            color: var(--text-secondary);
+            border-radius: 0;
         }
-        .footer-logo { opacity: 0.2; font-size: 24px; margin-bottom: 24px; }
-        .credits { font-size: 12px; color: var(--text-muted); }
-
+        .footer-content { display: flex; justify-content: space-between; }
+        
         @media (max-width: 768px) {
-            .doc-step { flex-direction: column !important; text-align: center; gap: 40px; }
+            .hero h1 { font-size: 42px; }
+            .grid-3 { grid-template-cols: 1fr; }
             .nav-links { display: none; }
+            .safety-banner { flex-direction: column; text-align: center; padding: 30px; }
         }
     </style>
 </head>
@@ -239,126 +251,107 @@
 
     <nav>
         <div class="container nav-content">
-            <div class="logo">FLASH<span>KIT</span></div>
+            <div class="logo">FlashKit</div>
             <div class="nav-links">
                 <a href="#features">Fitur</a>
-                <a href="#how-it-works">Cara Pakai</a>
+                <a href="#safety">Keamanan</a>
                 <a href="#download">Download</a>
             </div>
-            <a href="#download" class="btn-dl" style="padding: 10px 20px; font-size: 11px;">Get v1.6.2</a>
         </div>
     </nav>
 
     <header class="hero">
         <div class="container">
-            <div class="badge-v">INDUSTRIAL GRADE RELEASE V1.6.2</div>
-            <h1>Automate Your <br> <span class="gradient-text">Samsung Fleet</span></h1>
-            <p>Alat provisioning massal yang dirancang untuk kecepatan ekstrem, keamanan hardware, dan skalabilitas industri.</p>
-            <div style="display: flex; gap: 16px; justify-content: center;">
-                <a href="#download" class="btn-dl">Download Sekarang</a>
-                <a href="#how-it-works" class="btn-dl" style="background: transparent; border: 1px solid var(--border);">Lihat Panduan</a>
-            </div>
+            <span class="badge-new">Baru: v1.6.2 Kini Tersedia</span>
+            <h1>Satu Alat. <br> <span>Ribuan Kemungkinan.</span></h1>
+            <p>Standar baru dalam provisioning perangkat Samsung secara massal. Lebih cepat, lebih cerdas, dan jauh lebih aman.</p>
             
+            <div class="btn-group">
+                <a href="#download" class="btn btn-primary">Unduh Sekarang</a>
+                <a href="#" class="btn btn-link">Lihat Video Demo &rsaquo;</a>
+            </div>
+
             <div class="hero-mockup">
-                <img src="flashkit_v162_landing_mockup.png" alt="FlashKit Main Dashboard">
+                <img src="flashkit_apple_mockup.png" alt="FlashKit Apple Style Interface">
             </div>
         </div>
     </header>
 
     <section class="features" id="features">
         <div class="container">
-            <span class="section-tag">Powerful Engine</span>
-            <h2 style="font-size: 48px; text-transform: uppercase;">Built for Scale</h2>
-            
             <div class="grid-3">
-                <div class="card">
-                    <span class="card-icon">⚡</span>
-                    <h3>Master Sequence</h3>
-                    <p>Otomasi berantai tanpa intervensi. Jalankan Odin Flash, Skip Setup Wizard, Setup GBA, dan Koneksi WiFi dalam satu antrian cerdas.</p>
+                <div class="feature-card">
+                    <h3>Master Automation</h3>
+                    <p>Alur kerja otomatis yang menangani semuanya mulai dari flashing hingga setup WiFi dalam satu urutan mulus.</p>
                 </div>
-                <div class="card" style="border-color: var(--danger-glow);">
-                    <span class="card-icon">🛑</span>
-                    <h3>Emergency Stop</h3>
-                    <p>Keamanan hardware di atas segalanya. Kill switch instan untuk memutus komunikasi Odin & ADB jika terjadi anomali pada perangkat.</p>
+                <div class="feature-card">
+                    <h3>Shared Engine</h3>
+                    <p>Teknologi sinkronisasi cerdas yang menjaga stabilitas komunikasi hardware di seluruh instance aplikasi.</p>
                 </div>
-                <div class="card">
-                    <span class="card-icon">🔒</span>
-                    <h3>Shared Busy State</h3>
-                    <p>Proteksi multi-instance. Sinkronisasi status perangkat antar jendela FlashKit untuk mencegah tabrakan perintah pada port yang sama.</p>
+                <div class="feature-card">
+                    <h3>Universal Binary</h3>
+                    <p>Arsitektur Rust berperforma tinggi yang berjalan sempurna di Linux dan Windows dengan footprint memori minimal.</p>
                 </div>
             </div>
         </div>
     </section>
 
-    <section class="docs" id="how-it-works">
+    <section class="focus-section">
         <div class="container">
-            <span class="section-tag">Documentation</span>
-            
-            <!-- Step 1: Odin -->
-            <div class="doc-step">
-                <div class="doc-info">
-                    <h2>01. Odin Flash Engine</h2>
-                    <p>Siapkan firmware Samsung Anda. FlashKit mendukung pemuatan file BL, AP, CP, CSC, dan USERDATA secara massal dengan verifikasi checksum otomatis.</p>
-                    <div class="code-block">
-                        // Tips: Pastikan driver Samsung Mobile USB terinstal.<br>
-                        // FlashKit akan mendeteksi perangkat di mode Download secara otomatis.
-                    </div>
-                </div>
-                <div class="doc-visual">
-                    <img src="flashkit_odin_mockup.png" alt="Odin Engine Interface">
-                </div>
-            </div>
-
-            <!-- Step 2: Automation -->
-            <div class="doc-step">
-                <div class="doc-info">
-                    <h2>02. Master Automation</h2>
-                    <p>Setelah flashing selesai, FlashKit akan menunggu perangkat reboot dan masuk ke mode ADB. Secara otomatis menjalankan exploit AT untuk mengaktifkan debug dan melewati Setup Wizard.</p>
-                    <div class="code-block">
-                        > executing exploit: AT+USBDEBUG=1<br>
-                        > status: ADB_ENABLED_SUCCESS
-                    </div>
-                </div>
-                <div class="doc-visual">
-                    <img src="flashkit_v162_landing_mockup.png" alt="Automation Dashboard">
-                </div>
+            <h2>Didesain untuk Skala Besar.</h2>
+            <p>Dari 10 hingga 1000 perangkat, FlashKit memberikan kontrol presisi yang Anda butuhkan untuk mengelola armada Samsung Anda tanpa hambatan.</p>
+            <div style="max-width: 800px; margin: 0 auto; background: rgba(255,255,255,0.05); padding: 40px; text-align: left; border-radius: 24px;">
+                <div style="color: #64d2ff; font-family: monospace; font-size: 15px; margin-bottom: 10px;">[SUCCESS] Master Engine Initialized</div>
+                <div style="color: #fff; font-size: 17px;">&rsaquo; Menjalankan optimasi alur kerja...</div>
+                <div style="color: #fff; font-size: 17px;">&rsaquo; Memverifikasi integritas checksum...</div>
+                <div style="color: #fff; font-size: 17px;">&rsaquo; Semua sistem dalam kondisi prima.</div>
             </div>
         </div>
     </section>
 
-    <section class="download" id="download">
-        <div class="container">
-            <span class="section-tag">Deployment</span>
-            <h2 style="font-size: 48px; text-transform: uppercase;">Ready for Production</h2>
-            
-            <div class="download-grid">
-                <div class="dl-card">
-                    <h4>Linux Debian / Ubuntu</h4>
-                    <span class="ext">.DEB Package</span>
-                    <a href="#" class="btn-dl">Download .deb</a>
-                </div>
-                <div class="dl-card">
-                    <h4>Fedora / RedHat</h4>
-                    <span class="ext">.RPM Package</span>
-                    <a href="#" class="btn-dl">Download .rpm</a>
-                </div>
-                <div class="dl-card">
-                    <h4>Windows 10/11</h4>
-                    <span class="ext">.EXE Installer</span>
-                    <a href="#" class="btn-dl" style="opacity: 0.5; pointer-events: none;">Coming Soon</a>
-                </div>
+    <section class="container" id="safety">
+        <div class="safety-banner">
+            <div class="safety-icon">🛑</div>
+            <div class="safety-text">
+                <h4>Protokol Keamanan v1.6.2</h4>
+                <h3>Emergency Stop Terpadu.</h3>
+                <p>Fitur baru yang memberikan perlindungan instan bagi hardware Anda. Hentikan seluruh operasi backend secara seketika hanya dengan satu klik.</p>
             </div>
+        </div>
+    </section>
 
-            <div style="margin-top: 60px; color: var(--text-muted); font-size: 14px;">
-                Dibuat dengan Rust & Tauri untuk performa dan keamanan memori maksimal.
+    <section class="download-section" id="download">
+        <div class="container">
+            <h2 style="font-size: 48px; font-weight: 700; letter-spacing: -0.02em;">Pilih Versi Anda.</h2>
+            <div class="dl-grid">
+                <div class="dl-card">
+                    <h5>Linux DEB</h5>
+                    <span class="ver">Ubuntu, Debian &rsaquo; 1.6.2</span>
+                    <a href="#" class="dl-btn">Download</a>
+                </div>
+                <div class="dl-card">
+                    <h5>Linux RPM</h5>
+                    <span class="ver">Fedora, RedHat &rsaquo; 1.6.2</span>
+                    <a href="#" class="dl-btn">Download</a>
+                </div>
+                <div class="dl-card">
+                    <h5>Windows</h5>
+                    <span class="ver">Windows 10/11 &rsaquo; Coming Soon</span>
+                    <a href="#" class="dl-btn" style="opacity: 0.3; pointer-events: none;">Coming Soon</a>
+                </div>
             </div>
         </div>
     </section>
 
     <footer>
-        <div class="container">
-            <div class="footer-logo logo">FLASH<span>KIT</span></div>
-            <p class="credits">FlashKit Industrial Provisioning Engine &bull; Developed by Endri-Pro &bull; &copy; 2026</p>
+        <div class="container footer-content">
+            <div>
+                <p>&copy; 2026 FlashKit. By Endri-Pro.</p>
+                <p>Designed for professional industrial use.</p>
+            </div>
+            <div>
+                <p>Indonesia &bull; Global Support</p>
+            </div>
         </div>
     </footer>
 
