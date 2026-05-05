@@ -41,7 +41,7 @@
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 40px rgba(0,0,0,0.8);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8);
 }
 
 .odin-modal-header {
@@ -49,10 +49,13 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.odin-modal-header h3 { margin: 0; font-size: clamp(14px, 2vh, 18px); }
+.odin-modal-header h3 {
+  margin: 0;
+  font-size: clamp(14px, 2vh, 18px);
+}
 
 .odin-modal-body {
   padding: 20px;
@@ -84,7 +87,10 @@
   cursor: pointer;
   padding: 4px;
 }
-.btn-ghost-icon:hover { color: #ff453a; }
+
+.btn-ghost-icon:hover {
+  color: #ff453a;
+}
 
 /* Device Section */
 .devices-section {
@@ -102,9 +108,11 @@
 .devices-section::-webkit-scrollbar {
   height: 6px;
 }
+
 .devices-section::-webkit-scrollbar-track {
   background: transparent;
 }
+
 .devices-section::-webkit-scrollbar-thumb {
   background: var(--primary);
   border-radius: 10px;
@@ -112,9 +120,9 @@
 
 .device-skeleton {
   background: transparent;
-  border: 2px dashed rgba(255,255,255,0.1);
+  border: 2px dashed rgba(255, 255, 255, 0.1);
   border-radius: 10px;
-  min-width: 260px;
+  min-width: 320px;
   flex: 0 0 auto;
   height: 100%;
   opacity: 0.5;
@@ -122,8 +130,15 @@
 }
 
 @keyframes pulse-skeleton {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 0.3; }
+
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+
+  50% {
+    opacity: 0.3;
+  }
 }
 
 .device-card {
@@ -176,7 +191,9 @@
 
 .dev-progress-bg {
   position: absolute;
-  top: 0; left: 0; bottom: 0;
+  top: 0;
+  left: 0;
+  bottom: 0;
   width: 0%;
   background: var(--progress-green);
   z-index: 0;
@@ -196,7 +213,7 @@
   align-items: center;
   justify-content: center;
   padding: 0 16px;
-  border-right: 1px solid rgba(255,255,255,0.1);
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .dev-icon-area svg {
@@ -206,8 +223,15 @@
 }
 
 @keyframes iconGlow {
-  0% { filter: drop-shadow(0 0 2px rgba(59, 130, 246, 0.4)); transform: scale(1); }
-  100% { filter: drop-shadow(0 0 10px rgba(59, 130, 246, 1)); transform: scale(1.05); }
+  0% {
+    filter: drop-shadow(0 0 2px rgba(59, 130, 246, 0.4));
+    transform: scale(1);
+  }
+
+  100% {
+    filter: drop-shadow(0 0 10px rgba(59, 130, 246, 1));
+    transform: scale(1.05);
+  }
 }
 
 .dev-info-area {
@@ -221,7 +245,8 @@
 
 .custom-check-wrapper {
   position: absolute;
-  top: 12px; right: 12px;
+  top: 12px;
+  right: 12px;
   z-index: 2;
   cursor: pointer;
   display: flex;
@@ -232,7 +257,8 @@
 .custom-check-wrapper input[type="checkbox"] {
   position: absolute;
   opacity: 0;
-  width: 0; height: 0;
+  width: 0;
+  height: 0;
 }
 
 .custom-checkbox {
@@ -248,7 +274,8 @@
 }
 
 .custom-checkbox svg {
-  width: 16px; height: 16px;
+  width: 16px;
+  height: 16px;
   stroke: white;
   stroke-width: 4;
   stroke-linecap: round;
@@ -259,12 +286,12 @@
   transition: stroke-dashoffset 0.3s ease-in-out;
 }
 
-.custom-check-wrapper input[type="checkbox"]:checked ~ .custom-checkbox {
+.custom-check-wrapper input[type="checkbox"]:checked~.custom-checkbox {
   background: var(--progress-blue);
   border-color: var(--progress-blue);
 }
 
-.custom-check-wrapper input[type="checkbox"]:checked ~ .custom-checkbox svg {
+.custom-check-wrapper input[type="checkbox"]:checked~.custom-checkbox svg {
   stroke-dashoffset: 0;
 }
 
@@ -375,10 +402,10 @@
   flex-shrink: 0;
 }
 
-.file-label span { 
-  font-size: clamp(14px, 2.2vh, 20px); 
-  font-weight: 500; 
-  color: var(--text-main); 
+.file-label span {
+  font-size: clamp(14px, 2.2vh, 20px);
+  font-weight: 500;
+  color: var(--text-main);
 }
 
 .file-input-wrapper {
@@ -407,7 +434,9 @@
   pointer-events: none;
 }
 
-.file-input-wrapper:hover { background: #3a3a3c; }
+.file-input-wrapper:hover {
+  background: #3a3a3c;
+}
 
 .file-input-wrapper.flashing-disabled {
   pointer-events: none;
@@ -430,9 +459,19 @@
   position: relative;
 }
 
-.file-input-wrapper input.hidden { opacity: 0; }
-.file-input-wrapper input::placeholder { color: #636366; font-family: Inter, sans-serif; }
-.file-input-wrapper input.verifying { color: var(--progress-blue); animation: pulse-skeleton 1.5s infinite ease-in-out; }
+.file-input-wrapper input.hidden {
+  opacity: 0;
+}
+
+.file-input-wrapper input::placeholder {
+  color: #636366;
+  font-family: Inter, sans-serif;
+}
+
+.file-input-wrapper input.verifying {
+  color: var(--progress-blue);
+  animation: pulse-skeleton 1.5s infinite ease-in-out;
+}
 
 /* Action Section */
 .action-section {
@@ -472,33 +511,60 @@
   height: clamp(24px, 4vh, 32px);
   animation: spinGear 2s linear infinite;
 }
-.gear-icon.hidden { display: none; }
 
-@keyframes spinGear { 100% { transform: rotate(360deg); } }
+.gear-icon.hidden {
+  display: none;
+}
+
+@keyframes spinGear {
+  100% {
+    transform: rotate(360deg);
+  }
+}
 
 .btn-start-flash::before {
   content: '';
   position: absolute;
-  top: 0; left: -100%; width: 50%; height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+  top: 0;
+  left: -100%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
   animation: slideLight 3s infinite;
   z-index: 1;
 }
 
 @keyframes slideLight {
-  0% { left: -100%; }
-  50% { left: 200%; }
-  100% { left: 200%; }
+  0% {
+    left: -100%;
+  }
+
+  50% {
+    left: 200%;
+  }
+
+  100% {
+    left: 200%;
+  }
 }
 
-.btn-start-flash:hover { background: var(--primary-hover); }
-.btn-start-flash:active { transform: scale(0.99); }
+.btn-start-flash:hover {
+  background: var(--primary-hover);
+}
+
+.btn-start-flash:active {
+  transform: scale(0.99);
+}
+
 .btn-start-flash:disabled {
   background: var(--bg-input);
   color: var(--text-muted);
   cursor: not-allowed;
 }
-.btn-start-flash:disabled::before { display: none; }
+
+.btn-start-flash:disabled::before {
+  display: none;
+}
 
 .btn-icon {
   width: clamp(50px, 8vh, 80px);
@@ -518,5 +584,12 @@
   height: clamp(20px, 3vh, 30px);
 }
 
-.btn-icon:hover { background: #3a3a3c; }
-.btn-icon:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+.btn-icon:hover {
+  background: #3a3a3c;
+}
+
+.btn-icon:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
