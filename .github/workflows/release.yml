@@ -36,6 +36,13 @@ jobs:
         working-directory: ./bow-rust
         run: npm install
 
+      - name: get commit message
+        id: commit_msg
+        shell: bash
+        run: |
+          msg=$(git log -1 --pretty=%B)
+          echo "msg=$msg" >> $GITHUB_OUTPUT
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -43,7 +50,7 @@ jobs:
           projectPath: ./bow-rust
           tagName: ${{ github.ref_name }}
           releaseName: 'FlashKit ${{ github.ref_name }}'
-          releaseBody: 'FlashKit Release ${{ github.ref_name }}. See README for usage instructions.'
+          releaseBody: '${{ steps.commit_msg.outputs.msg }}'
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.platform == 'windows-latest' && '--bundles nsis' || '--bundles deb,rpm' }}
