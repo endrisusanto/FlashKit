@@ -1,6 +1,5 @@
 #!/bin/bash
 
-echo "Building FlashKit for Linux (DEB, RPM, AppImage) and Windows (EXE)"
 
 # Ensure we are in the tauri app directory
 cd "$(dirname "$0")/bow-rust" || exit
@@ -13,9 +12,20 @@ if [ -f "$HOME/.cargo/env" ]; then
   source "$HOME/.cargo/env"
 fi
 
+# Detect OS and set appropriate bundles
+OS_TYPE="$(uname -s)"
+if [[ "$OS_TYPE" == "Linux" ]]; then
+  echo "Detected Linux - Building DEB, RPM, and AppImage"
+  BUNDLES="deb,rpm,appimage"
+elif [[ "$OS_TYPE" == *"MINGW"* ]] || [[ "$OS_TYPE" == *"MSYS"* ]] || [[ "$OS_TYPE" == *"CYGWIN"* ]]; then
+  echo "Detected Windows - Building EXE (NSIS)"
+  BUNDLES="nsis"
+else
+  echo "Detected Other OS - Attempting all bundles"
+  BUNDLES="all"
+fi
+
 # Build the Tauri application
-# nsis produces .exe for Windows.
-# deb, rpm, appimage for Linux.
-npm run tauri build -- --bundles deb,rpm,appimage,nsis
+npm run tauri build -- --bundles "$BUNDLES"
 
 echo "Build complete! Check the src-tauri/target/release/bundle/ directory for your packages."
