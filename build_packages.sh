@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "Building FlashKit for Linux (DEB and RPM)"
+echo "Building FlashKit for Linux (DEB, RPM, AppImage) and Windows (EXE)"
 
 # Ensure we are in the tauri app directory
 cd "$(dirname "$0")/bow-rust" || exit
@@ -14,9 +14,8 @@ if [ -f "$HOME/.cargo/env" ]; then
 fi
 
 # Build the Tauri application
-# For Linux, this will generate AppImage, .deb, and .rpm if configured correctly.
-# The `tauri build` command uses the `--bundles` flag implicitly or explicitly depending on config.
-# We specify targets to explicitly build deb and rpm
-npm run tauri build -- --bundles deb,rpm
+# nsis produces .exe for Windows.
+# deb, rpm, appimage for Linux.
+npm run tauri build -- --bundles deb,rpm,appimage,nsis
 
 echo "Build complete! Check the src-tauri/target/release/bundle/ directory for your packages."
