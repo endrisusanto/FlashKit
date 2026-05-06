@@ -223,28 +223,16 @@ fn get_resource_path(app: tauri::AppHandle, name: String) -> Result<String, Stri
 }
 
 #[tauri::command]
-fn get_device_info(
-    serial: String,
-) -> Result<std::collections::HashMap<String, String>, String> {
-    let props = vec![
-        "ro.product.model",
-        "ro.build.PDA",
-        "ro.csc.sales_code",
-        "ro.csc.country_code",
-        "ro.build.fingerprint",
-    ];
-
+fn get_device_info(serial: String) -> Result<std::collections::HashMap<String, String>, String> {
     let mut info = std::collections::HashMap::new();
-    for prop in props {
-        let val = run_adb(vec![
-            "-s".to_string(),
-            serial.clone(),
-            "shell".to_string(),
-            "getprop".to_string(),
-            prop.to_string(),
-        ])?;
-        info.insert(prop.to_string(), val);
-    }
+    let val = run_adb(vec![
+        "-s".to_string(),
+        serial.clone(),
+        "shell".to_string(),
+        "getprop".to_string(),
+        "ro.product.model".to_string(),
+    ])?;
+    info.insert("ro.product.model".to_string(), val);
     Ok(info)
 }
 
@@ -345,27 +333,46 @@ fn get_app_dir() -> String {
 }
 
 #[tauri::command]
-fn get_devices() -> Result<Vec<String>, String> {
+#[derive(serde::Serialize)]
+struct AdbDevice {
+    serial: String,
+    usb: String,
+}
+
+#[tauri::command]
+fn get_devices_with_usb() -> Result<Vec<AdbDevice>, String> {
     let adb_path = find_adb();
     let mut cmd = Command::new(&adb_path);
-    cmd.arg("devices");
+    cmd.arg("devices").arg("-l");
 
     #[cfg(target_os = "windows")]
-    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    cmd.creation_flags(0x08000000);
 
     let output = cmd.output().map_err(|e| e.to_string())?;
-
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut devices = Vec::new();
 
     for line in stdout.lines().skip(1) {
+        if line.is_empty() { continue; }
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() == 2 && parts[1] == "device" {
-            devices.push(parts[0].to_string());
+        if parts.len() >= 2 && parts[1] == "device" {
+            let serial = parts[0].to_string();
+            let mut usb = String::new();
+            for p in parts {
+                if p.starts_with("usb:") {
+                    usb = p.replace("usb:", "");
+                }
+            }
+            devices.push(AdbDevice { serial, usb });
         }
     }
-
     Ok(devices)
+}
+
+#[tauri::command]
+fn get_devices() -> Result<Vec<String>, String> {
+    let list = get_devices_with_usb()?;
+    Ok(list.into_iter().map(|d| d.serial).collect())
 }
 
 #[tauri::command]
@@ -538,6 +545,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // ADB / Provisioning commands
             get_devices,
+            get_devices_with_usb,
             run_adb,
             get_adb_version,
             get_app_dir,

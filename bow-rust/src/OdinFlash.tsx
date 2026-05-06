@@ -76,7 +76,8 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
 
   useImperativeHandle(ref, () => ({
     startFlash: async () => {
-      return await startFlashInternal();
+      const res = await startFlashInternal();
+      return res;
     },
     hasCheckedDevices: () => {
       return Object.values(devicesRef.current).some(d => d.checked);
@@ -278,13 +279,13 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
 
   // ── Flash ─────────────────────────────────────────────────────────────
 
-  async function startFlashInternal(): Promise<boolean> {
+  async function startFlashInternal(): Promise<string[] | null> {
     const checked = Object.entries(devicesRef.current).filter(([, d]) => d.checked);
-    if (checked.length === 0) return false;
+    if (checked.length === 0) return null;
 
     if (!filePaths.bl && !filePaths.ap && !filePaths.cp && !filePaths.csc && !filePaths.userdata) {
       alert("Tidak ada file firmware yang dipilih di tab Odin Flash! Silakan pilih file tar.md5 terlebih dahulu.");
-      return false;
+      return null;
     }
 
     setIsFlashing(true);
@@ -329,11 +330,11 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
       })
     );
 
-    // Hapus busy flag setelah selesai
-    try { await invoke("clear_busy", { serials: checkedSerials }); } catch { }
+    // Jangan langsung hapus busy flag di sini, biarkan Master Sequence yang menangani transisinya
+    // try { await invoke("clear_busy", { serials: checkedSerials }); } catch { }
 
     setIsFlashing(false);
-    return !anyFail && anyPass;
+    return anyFail ? null : checkedSerials;
   }
 
   // ── UI (Original Odin-Clone Style) ────────────────────────────────────
