@@ -32,7 +32,7 @@ const playSuccessSound = () => {
 
 let confettiInterval: any = null;
 
-const startConfettiLoop = () => {
+const startConfettiLoop = (onStop?: () => void) => {
   if (confettiInterval) clearInterval(confettiInterval);
   const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 9999 };
 
@@ -47,11 +47,105 @@ const startConfettiLoop = () => {
     }
     try { confetti.reset(); } catch (e) { }
     window.removeEventListener('mousedown', stopConfetti);
+    if (onStop) onStop();
   };
 
   setTimeout(() => {
     window.addEventListener('mousedown', stopConfetti);
   }, 500);
+};
+
+const BouncingTimer = ({ startTime, active, isFinished }: { startTime: number, active: boolean, isFinished: boolean }) => {
+  const requestRef = useRef<number>(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const timeTextRef = useRef<HTMLSpanElement>(null);
+  
+  const posRef = useRef({ x: 100, y: 100 });
+  const velRef = useRef({ x: 1.5, y: 1.5 }); // Kecepatan diperlambat
+
+  useEffect(() => {
+    if (!active && !isFinished) return;
+
+    if (isFinished && containerRef.current) {
+      // Pindahkan ke tengah layar saat selesai
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const bw = containerRef.current.offsetWidth || 200;
+      const bh = containerRef.current.offsetHeight || 100;
+      posRef.current = { x: (w - bw) / 2, y: (h - bh) / 2 };
+      containerRef.current.style.transform = `translate(${posRef.current.x}px, ${posRef.current.y}px)`;
+      containerRef.current.style.transition = 'transform 0.5s cubic-bezier(0.25, 1, 0.5, 1)';
+      
+      // Update the final time display
+      if (timeTextRef.current) {
+        const diff = Date.now() - startTime;
+        const mins = Math.floor(diff / 60000).toString().padStart(2, '0');
+        const secs = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
+        timeTextRef.current.textContent = `${mins}:${secs}`;
+      }
+      return;
+    }
+
+    if (containerRef.current) {
+      containerRef.current.style.transition = 'none';
+    }
+
+    const tick = () => {
+      // Update timer text directly without React state re-render
+      if (!isFinished && timeTextRef.current) {
+        const diff = Date.now() - startTime;
+        const mins = Math.floor(diff / 60000).toString().padStart(2, '0');
+        const secs = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
+        timeTextRef.current.textContent = `${mins}:${secs}`;
+      }
+
+      // Update position directly to DOM
+      if (active && !isFinished && containerRef.current) {
+        let nx = posRef.current.x + velRef.current.x;
+        let ny = posRef.current.y + velRef.current.y;
+        
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const bw = containerRef.current.offsetWidth || 160;
+        const bh = containerRef.current.offsetHeight || 80;
+
+        if (nx <= 0 || nx >= w - bw) velRef.current.x *= -1;
+        if (ny <= 0 || ny >= h - bh) velRef.current.y *= -1;
+        
+        posRef.current = { x: nx, y: ny };
+        containerRef.current.style.transform = `translate(${nx}px, ${ny}px)`;
+      }
+      
+      requestRef.current = requestAnimationFrame(tick);
+    };
+
+    requestRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(requestRef.current);
+  }, [active, isFinished, startTime]);
+
+  if (!active && !isFinished) return null;
+
+  return (
+    <div 
+      ref={containerRef}
+      className={`fixed top-0 left-0 z-[10000] pointer-events-none select-none transition-all duration-500 rounded-[2rem] ${
+        isFinished 
+          ? "bg-[#111] border-[3px] border-green-500 shadow-[0_0_100px_rgba(34,197,94,0.4)] px-16 py-10" 
+          : "bg-blue-500/10 backdrop-blur-xl border border-blue-500/40 px-8 py-4 shadow-[0_0_40px_rgba(59,130,246,0.3)]"
+      }`}
+      style={{ opacity: (active || isFinished) ? 1 : 0, transform: `translate(${posRef.current.x}px, ${posRef.current.y}px)${isFinished ? ' scale(1.3)' : ' scale(1)'}` }}
+    >
+      <div className="flex flex-col items-center">
+        <div className="flex items-center gap-3 mb-2">
+          <div className={`w-2 h-2 rounded-full ${isFinished ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,1)]' : 'bg-blue-500 animate-ping'}`} />
+          <span className={`text-[12px] font-black tracking-[0.3em] uppercase ${isFinished ? 'text-green-400' : 'text-blue-400/80'}`}>
+            {isFinished ? 'Final Timer' : 'Processing'}
+          </span>
+        </div>
+        <span ref={timeTextRef} className={`font-mono font-black text-white tabular-nums tracking-tighter drop-shadow-lg ${isFinished ? 'text-7xl' : 'text-4xl'}`}>00:00</span>
+      </div>
+    </div>
+  );
 };
 
 
@@ -62,6 +156,7 @@ export default function App() {
   const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
   const [busyDevices, setBusyDevices] = useState<string[]>([]);
   const [odinDeviceStates, setOdinDeviceStates] = useState<Record<string, DeviceData>>({});
+  const [currentVerifyProgress, setCurrentVerifyProgress] = useState(0);
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -70,6 +165,13 @@ export default function App() {
 
   // Tab navigation
   const [activeTab, setActiveTab] = useState<"provisioning" | "odin">("provisioning");
+
+  // Timer State
+  const [timerState, setTimerState] = useState({
+    active: false,
+    startTime: 0,
+    isFinished: false
+  });
 
   // Modal State
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -119,6 +221,7 @@ export default function App() {
     if (stopRequested.current) return;
     stopRequested.current = true;
     setIsStopping(true);
+    setTimerState(prev => ({ ...prev, isFinished: true }));
     appendLog("‼ EMERGENCY STOP DIAKTIFKAN! Mematikan semua proses...");
     
     try {
@@ -514,6 +617,8 @@ export default function App() {
     try {
       await new Promise(r => setTimeout(r, 50));
 
+      stopRequested.current = false;
+      setTimerState({ active: true, startTime: Date.now(), isFinished: false });
       appendLog("==== MEMULAI MASTER SEQUENCE ====");
       if (activeSelection.length > 0) {
         appendLog(`[Auto] Mengunci ${activeSelection.length} perangkat: ${activeSelection.join(", ")}`);
@@ -610,7 +715,10 @@ export default function App() {
       }
 
       appendLog("==== MASTER SEQUENCE SELESAI ====");
-      startConfettiLoop();
+      setTimerState(prev => ({ ...prev, isFinished: true }));
+      startConfettiLoop(() => {
+        setTimerState({ active: false, startTime: 0, isFinished: false });
+      });
       playSuccessSound();
     } catch (e: any) {
       if (e?.message === "STOP" || stopRequested.current) {
@@ -830,12 +938,18 @@ export default function App() {
             <button
               id="tab-odin"
               onClick={() => setActiveTab("odin")}
-              className={`h-full px-12 text-[13px] font-black uppercase tracking-[0.2em] border-b-[3px] transition-all ${activeTab === "odin"
+              className={`h-full px-12 text-[13px] font-black uppercase tracking-[0.2em] border-b-[3px] transition-all relative overflow-hidden ${activeTab === "odin"
                 ? "border-blue-500 text-blue-400 bg-blue-500/[0.02]"
                 : "border-transparent text-white/30 hover:text-white/60 hover:bg-white/[0.01]"
                 }`}
             >
-              FIRMWARE
+              {currentVerifyProgress > 0 && currentVerifyProgress < 100 && (
+                <div 
+                  className="absolute bottom-0 left-0 h-full bg-blue-500/10 transition-all duration-300 pointer-events-none"
+                  style={{ width: `${currentVerifyProgress}%` }}
+                />
+              )}
+              <span className="relative z-10">FIRMWARE</span>
             </button>
           </div>
         </header>
@@ -848,6 +962,7 @@ export default function App() {
               selectedSerials={selectedDevices}
               setSelectedSerials={setSelectedDevices}
               onDevicesUpdate={setOdinDeviceStates}
+              onVerifyProgress={setCurrentVerifyProgress}
             />
           </div>
         </div>
@@ -1078,6 +1193,12 @@ export default function App() {
             </button>
           </div>
         </main>
+
+        <BouncingTimer 
+          startTime={timerState.startTime} 
+          active={timerState.active} 
+          isFinished={timerState.isFinished} 
+        />
 
         <footer className="h-10 bg-[#0d0d0d] border-t border-[#222] flex items-center px-8 justify-between shrink-0 relative z-50">
           <div className="flex items-center gap-4">
