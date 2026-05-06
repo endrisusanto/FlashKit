@@ -449,9 +449,9 @@ export default function App() {
         }
 
         await invoke("run_adb", { args: ["-s", dev, "shell", "am instrument -e method saveConfiguration -w com.android.tradefed.utils.wifi/.WifiUtil"] });
-        await delay(500);
-        await invoke("run_adb", { args: ["-s", dev, "shell", "pm uninstall com.android.tradefed.utils.wifi"] });
-        appendLog(`[${dev}] ✓ WiFi Connect SELESAI (Cleaner OK)`);
+        await delay(2000);
+        // Jangan uninstall WifiUtil di sini agar profil tetap tersimpan di sistem
+        appendLog(`[${dev}] ✓ WiFi Connect SELESAI`);
       } catch (e: any) { appendLog(`[${dev}] ✗ GAGAL: ${e}`); }
     }));
     if (!isSequence) setLoading(false);
