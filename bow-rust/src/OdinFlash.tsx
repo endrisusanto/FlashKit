@@ -27,7 +27,7 @@ interface DeviceData {
 }
 
 export interface OdinFlashRef {
-  startFlash: () => Promise<string[] | null>;
+  startFlash: () => Promise<number | null>;
   hasCheckedDevices: () => boolean;
 }
 
@@ -279,7 +279,7 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
 
   // ── Flash ─────────────────────────────────────────────────────────────
 
-  async function startFlashInternal(): Promise<string[] | null> {
+  async function startFlashInternal(): Promise<number | null> {
     const checked = Object.entries(devicesRef.current).filter(([, d]) => d.checked);
     if (checked.length === 0) return null;
 
@@ -328,11 +328,9 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
       })
     );
 
-    // Jangan langsung hapus busy flag di sini, biarkan Master Sequence yang menangani transisinya
-    // try { await invoke("clear_busy", { serials: checkedSerials }); } catch { }
-
+    // Jangan hapus busy flag Odin
     setIsFlashing(false);
-    return anyFail ? null : checkedSerials;
+    return anyFail ? null : checked.length;
   }
 
   // ── UI (Original Odin-Clone Style) ────────────────────────────────────

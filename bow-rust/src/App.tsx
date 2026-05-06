@@ -478,8 +478,8 @@ export default function App() {
           if (!odinRef.current.hasCheckedDevices()) {
             appendLog("✗ Odin Flash dilewati: Tidak ada perangkat yang dicentang di tab Odin Flash.");
           } else {
-            const flashedPorts: string[] | null = await odinRef.current.startFlash();
-            if (!flashedPorts) {
+            const flashedCount: number | null = await odinRef.current.startFlash();
+            if (flashedCount === null || flashedCount === 0) {
               appendLog("⚠ Odin Flash memiliki kegagalan atau file firmware belum dipilih!");
               return;
             } else {
@@ -489,50 +489,45 @@ export default function App() {
               const adbReady = await waitForAdb(600000, preFlashAdb);
               if (!adbReady) {
                 appendLog("✗ Timeout: Perangkat tidak terdeteksi oleh ADB setelah 10 menit.");
-                // Cleanup busy ports if timeout
-                try { await invoke("clear_busy", { serials: flashedPorts }); } catch { }
                 return;
               }
 
               appendLog("✓ Perangkat ADB terdeteksi! Menunggu stabilisasi sistem (10 detik)...");
               await delay(10000); 
 
+              // JITTER: Mencegah Race Condition antar instance dengan delay acak 0-3000ms
+              const jitter = Math.floor(Math.random() * 3000);
+              await delay(jitter);
+
               // Refresh list device di layar
               await refreshDevices();
 
               try {
-                // Gunakan get_devices_with_usb untuk matching USB port
-                const adbWithUsb: { serial: string, usb: string }[] = await invoke("get_devices_with_usb");
+                const currentBusy: string[] = await invoke("get_busy_devices");
+                const currentAdb = await invoke<string[]>("get_devices");
                 
-                // Cari perangkat yang serialnya tidak ada di pre-flash AND USB-nya ada di flashedPorts
-                const matchedDevices = adbWithUsb.filter(d => 
-                   !preFlashAdb.includes(d.serial) && flashedPorts.includes(d.usb)
+                // Ambil perangkat yang: 1) Baru (bukan preFlash) 2) Belum diklaim (tidak di busy.json)
+                const availableNewDevices = currentAdb.filter(d => 
+                   !preFlashAdb.includes(d) && !currentBusy.includes(d)
                 );
 
-                if (matchedDevices.length > 0) {
-                  const serials = matchedDevices.map(d => d.serial);
-                  automationTarget = serials;
-                  setSelectedDevices(serials);
+                if (availableNewDevices.length > 0) {
+                  // Klaim HANYA sebanyak yang di-flash oleh window ini
+                  const targetCount = Math.min(flashedCount, availableNewDevices.length);
+                  const claimedSerials = availableNewDevices.slice(0, targetCount);
+                  
+                  automationTarget = claimedSerials;
+                  setSelectedDevices(claimedSerials);
                   
                   // KUNCI serial ADB-nya di busy.json
-                  try { await invoke("mark_busy", { serials }); } catch { }
-                  // LEPAS kunci port USB Odin-nya
-                  try { await invoke("clear_busy", { serials: flashedPorts }); } catch { }
+                  try { await invoke("mark_busy", { serials: claimedSerials }); } catch { }
 
-                  appendLog(`[Auto] Berhasil mencocokkan ${matchedDevices.length} perangkat via Port USB ${flashedPorts.join(", ")}.`);
+                  appendLog(`[Auto] Berhasil mengklaim ${claimedSerials.length} perangkat (Jitter: ${jitter}ms).`);
                 } else {
-                  appendLog("⚠ Gagal mencocokkan perangkat ADB dengan Port USB Odin. Melanjutkan dengan deteksi standar...");
-                  const currentAdb = await invoke<string[]>("get_devices");
-                  const newlyBooted = currentAdb.filter(d => !preFlashAdb.includes(d));
-                  if (newlyBooted.length > 0) {
-                    automationTarget = newlyBooted;
-                    setSelectedDevices(newlyBooted);
-                  }
-                  // Cleanup busy ports anyway
-                  try { await invoke("clear_busy", { serials: flashedPorts }); } catch { }
+                  appendLog("⚠ Tidak ada perangkat baru yang tersedia untuk diklaim. Mungkin sudah diambil instance lain.");
                 }
               } catch (e) { 
-                try { await invoke("clear_busy", { serials: flashedPorts }); } catch { }
+                appendLog(`✗ Error saat mengklaim perangkat: ${e}`);
               }
             }
           }
