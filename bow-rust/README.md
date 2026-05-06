@@ -1,4 +1,4 @@
-# FlashKit v1.6.6 - Industrial Bulk Provisioning Tool
+# FlashKit v1.7.0 - Industrial Bulk Provisioning Tool
 
 FlashKit is a high-performance, industrial-grade tool designed for bulk Android device provisioning and firmware flashing. Built with **Tauri**, **Rust**, and **React**, it provides a robust and efficient workflow for managing large quantities of Samsung devices simultaneously.
 
@@ -30,7 +30,7 @@ FlashKit is a high-performance, industrial-grade tool designed for bulk Android 
 ```bash
 ./build_packages.sh
 # Install via dpkg or rpm
-sudo dpkg -i src-tauri/target/release/bundle/deb/FlashKit_1.6.6_amd64.deb
+sudo dpkg -i src-tauri/target/release/bundle/deb/FlashKit_1.7.0_amd64.deb
 ```
 
 ### Windows
