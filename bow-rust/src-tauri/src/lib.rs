@@ -332,7 +332,6 @@ fn get_app_dir() -> String {
     get_exe_dir().to_string_lossy().to_string()
 }
 
-#[tauri::command]
 #[derive(serde::Serialize)]
 struct AdbDevice {
     serial: String,
