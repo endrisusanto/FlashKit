@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X, Download, ShieldAlert } from "lucide-react";
-import OdinFlash, { OdinFlashRef } from "./OdinFlash";
+import OdinFlash, { OdinFlashRef, DeviceData } from "./OdinFlash";
 import logo from './assets/logo.png';
 import confetti from 'canvas-confetti';
 
@@ -60,6 +60,8 @@ export default function App() {
   const [devices, setDevices] = useState<string[]>([]);
   const [deviceDetails, setDeviceDetails] = useState<Record<string, any>>({});
   const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
+  const [busyDevices, setBusyDevices] = useState<string[]>([]);
+  const [odinDeviceStates, setOdinDeviceStates] = useState<Record<string, DeviceData>>({});
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -86,7 +88,6 @@ export default function App() {
   const [seqGba, setSeqGba] = useState(localStorage.getItem('seqGba') !== 'false');
   const [seqWifi, setSeqWifi] = useState(localStorage.getItem('seqWifi') !== 'false');
   const [currentStep, setCurrentStep] = useState<number | null>(null);
-  const [busyDevices, setBusyDevices] = useState<string[]>([]);
   const [isStopping, setIsStopping] = useState(false);
   const stopRequested = useRef(false);
 
@@ -127,12 +128,21 @@ export default function App() {
       appendLog(`✗ Gagal menghentikan proses: ${e}`);
     }
 
-    // Reset status setelah beberapa detik
+    // Reset status setelah 10 detik agar tombol tidak menyala selamanya jika ada proses yang macet
     setTimeout(() => {
+      if (!loading) {
+        stopRequested.current = false;
+        setIsStopping(false);
+      }
+    }, 10000);
+  };
+
+  useEffect(() => {
+    if (!loading && stopRequested.current) {
       stopRequested.current = false;
       setIsStopping(false);
-    }, 3000);
-  };
+    }
+  }, [loading]);
 
   useEffect(() => {
     const poll = async () => {
@@ -151,6 +161,7 @@ export default function App() {
   const waitForAdb = async (timeoutMs = 600000, preFlashDevices: string[] = []) => {
     const startTime = Date.now();
     while (Date.now() - startTime < timeoutMs) {
+      if (stopRequested.current) return false;
       try {
         const list: string[] = await invoke<string[]>("get_devices");
         const newDevices = list.filter(d => !preFlashDevices.includes(d));
@@ -163,53 +174,69 @@ export default function App() {
     return false;
   };
 
-  const refreshDevices = async () => {
+  const refreshDevices = async (silent = false) => {
     setLoading(true);
-    appendLog("Memindai port COM & Modem...");
+    if (!silent) appendLog("Memindai port COM & Modem...");
     let samsungPortsCount = 0;
     try {
       const samsungPorts: string[] = await invoke("get_samsung_ports");
       samsungPortsCount = samsungPorts.length;
       if (samsungPorts.length > 0) {
-        appendLog(`[Auto] Mendeteksi ${samsungPorts.length} Samsung Modem. Membangunkan ADB...`);
+        if (!silent) appendLog(`[Auto] Mendeteksi ${samsungPorts.length} Samsung Modem. Membangunkan ADB...`);
         await Promise.all(samsungPorts.map(port => sendAT(true, port)));
         await delay(2000);
       }
     } catch (e) { console.error(e); }
 
-    appendLog("Memindai perangkat ADB...");
+    if (!silent) appendLog("Memindai perangkat ADB...");
     try {
-      const list: string[] = await invoke("get_devices");
+      const advList: any[] = await invoke("get_adb_devices_advanced");
+      const list = advList.map((d: any) => d.serial);
       setDevices(list);
       const details: Record<string, any> = {};
       let hasFail = false;
 
-      await Promise.all(list.map(async (id) => {
+      await Promise.all(advList.map(async (adv) => {
         try {
-          const info: any = await invoke("get_device_info", { serial: id });
+          const info: any = await invoke("get_device_info", { serial: adv.serial });
           if (!info || Object.keys(info).length === 0) throw new Error("Data Kosong");
-          details[id] = info;
+          details[adv.serial] = { ...info, usb_port: adv.usb_port, _model: adv.model };
+          // Save to history for Odin tab
+          localStorage.setItem('port_history_' + adv.usb_port, JSON.stringify({ serial: adv.serial, model: info['ro.product.model'] || adv.model }));
         } catch (e) {
-          console.error(`Gagal ambil data ${id}:`, e);
+          console.error(`Gagal ambil data ${adv.serial}:`, e);
           hasFail = true;
-          setFailedDevice(id);
+          setFailedDevice(adv.serial);
+          details[adv.serial] = { usb_port: adv.usb_port, _model: adv.model };
+          localStorage.setItem('port_history_' + adv.usb_port, JSON.stringify({ serial: adv.serial, model: adv.model }));
         }
       }));
 
       setDeviceDetails(details);
       if (selectedDevices.length === 0) setSelectedDevices(list);
-      appendLog(`Ditemukan ${list.length} perangkat`);
+      if (!silent) appendLog(`Ditemukan ${list.length} perangkat`);
 
-      if (samsungPortsCount > 0 && list.length === 0) {
+      if (samsungPortsCount > 0 && list.length === 0 && !silent) {
         setShowAdbWarningModal(true);
       }
 
-      if (hasFail) {
+      if (hasFail && !silent) {
         setShowErrorModal(true);
         appendLog("⚠ PERINGATAN: Beberapa perangkat gagal memberikan data prop.");
       }
-    } catch (e: any) { appendLog(`ERROR: ${e}`); }
+    } catch (e: any) { if (!silent) appendLog(`ERROR: ${e}`); }
     setLoading(false);
+  };
+
+  const resetBusy = async () => {
+    try {
+      await invoke("reset_busy_devices");
+      appendLog("✓ Status BUSY pada semua perangkat telah direset.");
+      const busy: string[] = await invoke("get_busy_devices");
+      setBusyDevices(busy);
+    } catch (e) {
+      appendLog(`✗ Gagal mereset status busy: ${e}`);
+    }
   };
 
   const sendAT = async (silent = false, portOverride?: string) => {
@@ -242,32 +269,47 @@ export default function App() {
     }
   };
 
-  const skipWz = async (isSequence = false, explicitDevices?: string[]) => {
+  const skipWz = async (isSequence = false, manualSelection?: string[]) => {
     if (!isSequence) setLoading(true);
     appendLog("Tahap 1: Inisialisasi AT Exploit...");
     const ports: string[] = await invoke("get_samsung_ports");
     if (ports.length > 0) { await Promise.all(ports.map(p => sendAT(false, p))); await delay(2500); }
-    const list: string[] = await invoke("get_devices");
-    
-    // Gunakan explicitDevices (dari Master Sequence), atau selectedDevices (manual), atau semua (list)
-    const base = explicitDevices || selectedDevices;
-    const active = base.length > 0 
-      ? base.filter(id => list.includes(id)) 
-      : list;
+    let active: string[] = [];
+    const sourceList = manualSelection || selectedDevices;
+    for (let i = 0; i < 10; i++) {
+      if (stopRequested.current) throw new Error("STOP");
+      const list: string[] = await invoke("get_devices");
+      active = sourceList.length > 0 
+        ? sourceList.filter(id => list.includes(id)) 
+        : list;
+      if (active.length > 0) break;
+      if (isSequence) {
+        appendLog(`⏳ Menunggu perangkat untuk Skip Wizard (Percobaan ${i + 1}/10). Mencoba lagi dalam 10 detik...`);
+        await delay(10000);
+      } else {
+        break;
+      }
+    }
 
     if (active.length === 0) { appendLog("✗ Perangkat tidak ditemukan atau tidak terpilih."); if (!isSequence) setLoading(false); return; }
 
     let apkData: string, apkTest: string, apkLang: string;
     try {
+      if (stopRequested.current) throw new Error("STOP");
       apkData = await invoke("get_resource_path", { name: "Data_Saver_Test-debug.apk" });
       apkTest = await invoke("get_resource_path", { name: "Data_Saver_Test-debug-androidTest.apk" });
       apkLang = await invoke("get_resource_path", { name: "language.apk" });
     } catch (e) { appendLog(`ERROR: APK tidak ditemukan. ${e}`); if (!isSequence) setLoading(false); return; }
 
     await Promise.all(active.map(async (dev) => {
+      if (stopRequested.current) return;
       appendLog(`[${dev}] Memproses Skip Wizard...`);
       try {
-        const run = async (args: string[]) => { await invoke("run_adb", { args: ["-s", dev, "shell", ...args] }); await delay(100); };
+        const run = async (args: string[]) => { 
+          if (stopRequested.current) return;
+          await invoke("run_adb", { args: ["-s", dev, "shell", ...args] }); 
+          await delay(100); 
+        };
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apkLang] });
         await run(["am start -n net.sanapeli.adbchangelanguage/.AdbChangeLanguage --es language en --es country US"]);
         await delay(800);
@@ -299,22 +341,22 @@ export default function App() {
     if (!isSequence) setLoading(false);
   };
 
-  const setupPrecondition = async (isSequence = false, explicitDevices?: string[]) => {
+  const setupPrecondition = async (isSequence = false, manualSelection?: string[]) => {
     let active: string[] = [];
     if (!isSequence) setLoading(true);
 
-    const base = explicitDevices || selectedDevices;
-
+    const sourceList = manualSelection || selectedDevices;
     // Auto-retry untuk mendapatkan perangkat jika kosong
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
+      if (stopRequested.current) throw new Error("STOP");
       const list: string[] = await invoke("get_devices");
-      active = base.length > 0 
-        ? base.filter(id => list.includes(id)) 
+      active = sourceList.length > 0 
+        ? sourceList.filter(id => list.includes(id)) 
         : list;
       if (active.length > 0) break;
       if (isSequence) {
-        appendLog(`⏳ Menunggu perangkat untuk Setup GBA (Percobaan ${i + 1}/5)...`);
-        await delay(3000);
+        appendLog(`⏳ Menunggu perangkat untuk Setup GBA (Percobaan ${i + 1}/10). Mencoba lagi dalam 10 detik...`);
+        await delay(10000);
       } else {
         break;
       }
@@ -324,8 +366,13 @@ export default function App() {
     if (!isSequence) setLoading(true);
     appendLog("──── Setup Precondition ────");
     await Promise.all(active.map(async (dev) => {
+      if (stopRequested.current) return;
       try {
-        const run = async (args: string[]) => { await invoke("run_adb", { args: ["-s", dev, "shell", ...args] }); await delay(100); };
+        const run = async (args: string[]) => { 
+          if (stopRequested.current) return;
+          await invoke("run_adb", { args: ["-s", dev, "shell", ...args] }); 
+          await delay(100); 
+        };
         await run(["settings put global development_settings_enabled 1"]);
         await run(["settings put global adb_enabled 1"]);
         await run(["settings put global verifier_verify_adb_installs 0"]);
@@ -344,22 +391,22 @@ export default function App() {
     if (!isSequence) setLoading(false);
   };
 
-  const connectWifi = async (isSequence = false, explicitDevices?: string[]) => {
+  const connectWifi = async (isSequence = false, manualSelection?: string[]) => {
     if (!isSequence) setLoading(true);
 
     let active: string[] = [];
-    const base = explicitDevices || selectedDevices;
-
+    const sourceList = manualSelection || selectedDevices;
     // Auto-retry untuk mendapatkan perangkat jika kosong
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
+      if (stopRequested.current) throw new Error("STOP");
       const list: string[] = await invoke("get_devices");
-      active = base.length > 0 
-        ? base.filter(id => list.includes(id)) 
+      active = sourceList.length > 0 
+        ? sourceList.filter(id => list.includes(id)) 
         : list;
       if (active.length > 0) break;
       if (isSequence) {
-        appendLog(`⏳ Menunggu perangkat untuk WiFi Connect (Percobaan ${i + 1}/5)...`);
-        await delay(3000);
+        appendLog(`⏳ Menunggu perangkat untuk WiFi Connect (Percobaan ${i + 1}/10). Mencoba lagi dalam 10 detik...`);
+        await delay(10000);
       } else {
         break;
       }
@@ -370,9 +417,13 @@ export default function App() {
     appendLog(`──── WiFi Connect: ${ssid} ────`);
 
     let apk: string;
-    try { apk = await invoke("get_resource_path", { name: "WifiUtil.apk" }); } catch (e) { appendLog(`ERR: ${e}`); if (!isSequence) setLoading(false); return; }
+    try { 
+      if (stopRequested.current) throw new Error("STOP");
+      apk = await invoke("get_resource_path", { name: "WifiUtil.apk" }); 
+    } catch (e) { appendLog(`ERR: ${e}`); if (!isSequence) setLoading(false); return; }
 
     await Promise.all(active.map(async (dev) => {
+      if (stopRequested.current) return;
       try {
         appendLog(`[${dev}] Menyiapkan utilitas WiFi...`);
         await invoke("run_adb", { args: ["-s", dev, "shell", "svc wifi enable"] });
@@ -464,11 +515,15 @@ export default function App() {
       await new Promise(r => setTimeout(r, 50));
 
       appendLog("==== MEMULAI MASTER SEQUENCE ====");
+      if (activeSelection.length > 0) {
+        appendLog(`[Auto] Mengunci ${activeSelection.length} perangkat: ${activeSelection.join(", ")}`);
+      } else if (seqOdin) {
+        appendLog("[Auto] Memulai dengan mode Odin (Deteksi ADB akan dilakukan setelah flashing).");
+      }
 
+      let currentSelection = activeSelection;
       let preFlashAdb: string[] = [];
       try { preFlashAdb = await invoke<string[]>("get_devices"); } catch (e) { }
-
-      let automationTarget = activeSelection;
 
       if (seqOdin) {
         if (stopRequested.current) throw new Error("STOP");
@@ -478,8 +533,8 @@ export default function App() {
           if (!odinRef.current.hasCheckedDevices()) {
             appendLog("✗ Odin Flash dilewati: Tidak ada perangkat yang dicentang di tab Odin Flash.");
           } else {
-            const flashedCount: number | null = await odinRef.current.startFlash();
-            if (flashedCount === null || flashedCount === 0) {
+            const flashResult = await odinRef.current.startFlash();
+            if (!flashResult) {
               appendLog("⚠ Odin Flash memiliki kegagalan atau file firmware belum dipilih!");
               return;
             } else {
@@ -494,40 +549,39 @@ export default function App() {
 
               appendLog("✓ Perangkat ADB terdeteksi! Menunggu stabilisasi sistem (10 detik)...");
               await delay(10000); 
+              await refreshDevices(true);
 
-              // JITTER: Mencegah Race Condition antar instance dengan delay acak 0-3000ms
-              const jitter = Math.floor(Math.random() * 3000);
-              await delay(jitter);
-
-              // Refresh list device di layar
-              await refreshDevices();
-
-              try {
-                const currentBusy: string[] = await invoke("get_busy_devices");
-                const currentAdb = await invoke<string[]>("get_devices");
+              // Refresh list device di layar (Retry logic: 10x)
+              let foundNew = false;
+              for (let i = 0; i < 10; i++) {
+                if (stopRequested.current) break;
+                await refreshDevices(true);
+                try {
+                  const currentAdb = await invoke<string[]>("get_devices");
+                  // HANYA ambil perangkat yang memang kita kunci di awal (activeSelection)
+                  const newlyBooted = currentAdb.filter(d => !preFlashAdb.includes(d) && activeSelection.includes(d));
+                  
+                  if (newlyBooted.length > 0) {
+                    setSelectedDevices(newlyBooted);
+                    currentSelection = newlyBooted;
+                    appendLog(`✓ Perangkat target terdeteksi kembali: ${newlyBooted.join(", ")}`);
+                    appendLog(`[Auto] Mengunci proses selanjutnya untuk ${newlyBooted.length} perangkat.`);
+                    foundNew = true;
+                    break;
+                  }
+                } catch (e) { }
                 
-                // Ambil perangkat yang: 1) Baru (bukan preFlash) 2) Belum diklaim (tidak di busy.json)
-                const availableNewDevices = currentAdb.filter(d => 
-                   !preFlashAdb.includes(d) && !currentBusy.includes(d)
-                );
-
-                if (availableNewDevices.length > 0) {
-                  // Klaim HANYA sebanyak yang di-flash oleh window ini
-                  const targetCount = Math.min(flashedCount, availableNewDevices.length);
-                  const claimedSerials = availableNewDevices.slice(0, targetCount);
-                  
-                  automationTarget = claimedSerials;
-                  setSelectedDevices(claimedSerials);
-                  
-                  // KUNCI serial ADB-nya di busy.json
-                  try { await invoke("mark_busy", { serials: claimedSerials }); } catch { }
-
-                  appendLog(`[Auto] Berhasil mengklaim ${claimedSerials.length} perangkat (Jitter: ${jitter}ms).`);
-                } else {
-                  appendLog("⚠ Tidak ada perangkat baru yang tersedia untuk diklaim. Mungkin sudah diambil instance lain.");
+                if (i < 9) {
+                  appendLog(`⏳ Perangkat belum terdeteksi sempurna (Percobaan ${i+1}/10). Mencoba lagi dalam 10 detik...`);
+                  await delay(10000);
                 }
-              } catch (e) { 
-                appendLog(`✗ Error saat mengklaim perangkat: ${e}`);
+              }
+
+              if (!foundNew) {
+                appendLog("✗ KRITIKAL: Perangkat tidak ditemukan setelah 10x percobaan!");
+                alert("Kritikal: Perangkat tidak terdeteksi setelah reboot!\nProses dihentikan secara paksa demi keamanan.");
+                await handleEmergencyStop();
+                return;
               }
             }
           }
@@ -537,21 +591,21 @@ export default function App() {
       if (seqSkipWz) {
         if (stopRequested.current) throw new Error("STOP");
         setCurrentStep(1);
-        await skipWz(true, automationTarget);
+        await skipWz(true, currentSelection);
         await delay(2000);
       }
 
       if (seqGba) {
         if (stopRequested.current) throw new Error("STOP");
         setCurrentStep(2);
-        await setupPrecondition(true, automationTarget);
+        await setupPrecondition(true, currentSelection);
         await delay(2000);
       }
 
       if (seqWifi) {
         if (stopRequested.current) throw new Error("STOP");
         setCurrentStep(3);
-        await connectWifi(true, automationTarget);
+        await connectWifi(true, currentSelection);
         await delay(2000);
       }
 
@@ -692,7 +746,7 @@ export default function App() {
             <div className="bg-[#111] border border-[#333] rounded-3xl p-8 max-w-2xl w-full shadow-2xl relative">
               <div className="absolute top-6 right-6 flex items-center gap-4">
                 <button
-                  onClick={refreshDevices}
+                  onClick={() => refreshDevices()}
                   title="Refresh Daftar Perangkat"
                   className="flex items-center gap-2 px-4 py-2 text-[11px] font-black uppercase tracking-widest text-white/40 hover:text-white hover:bg-white/10 transition-all rounded-xl border border-white/5"
                 >
@@ -789,7 +843,12 @@ export default function App() {
         {/* Always mount OdinFlash to retain state and refs, but hide it if not active */}
         <div className={activeTab === "odin" ? "flex-1 flex flex-col min-h-0 p-8" : "hidden"}>
           <div className="flex-1 flex flex-col bg-[#121212] border border-[#222] rounded-3xl p-8 overflow-hidden shadow-inner">
-            <OdinFlash ref={odinRef} />
+            <OdinFlash 
+              ref={odinRef} 
+              selectedSerials={selectedDevices}
+              setSelectedSerials={setSelectedDevices}
+              onDevicesUpdate={setOdinDeviceStates}
+            />
           </div>
         </div>
 
@@ -800,10 +859,13 @@ export default function App() {
               <div className="flex flex-col gap-3">
                 <h3 className="text-[11px] font-black text-white/40 uppercase tracking-widest text-center">Daftar Perangkat ({devices.length})</h3>
                 <div className="flex items-center justify-center gap-3 px-2">
-                  <button onClick={refreshDevices} className="p-2.5 bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all rounded-xl shadow-sm">
+                  <button onClick={() => refreshDevices()} title="Refresh Device List" className="p-2.5 bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all rounded-xl shadow-sm">
                     <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-blue-500' : 'text-white/60'}`} />
                   </button>
-                  <button onClick={selectAll} className="px-10 py-2.5 bg-white/5 border border-white/10 text-[10px] font-black uppercase hover:bg-white/10 hover:border-white/20 transition-all tracking-widest rounded-xl shadow-sm">
+                  <button onClick={resetBusy} title="Reset All Busy Status" className="p-2.5 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 hover:border-red-500/40 transition-all rounded-xl shadow-sm group">
+                    <ShieldAlert className="w-4 h-4 text-red-500/60 group-hover:text-red-500 transition-colors" />
+                  </button>
+                  <button onClick={selectAll} className="flex-1 py-2.5 bg-white/5 border border-white/10 text-[10px] font-black uppercase hover:bg-white/10 hover:border-white/20 transition-all tracking-widest rounded-xl shadow-sm">
                     {selectedDevices.length === devices.length ? "Uncheck All" : "Select All"}
                   </button>
                 </div>
@@ -821,6 +883,25 @@ export default function App() {
                       onClick={() => !busyDevices.includes(id) && toggleDevice(id)}
                       className={`p-7 rounded-2xl border transition-all cursor-pointer relative overflow-hidden ${busyDevices.includes(id) ? 'opacity-50 grayscale cursor-not-allowed border-white/5 bg-white/5' : selectedDevices.includes(id) ? 'border-white shadow-[0_0_15px_rgba(255,255,255,0.25)]' : 'border-[#222] hover:border-white/10'}`}
                     >
+                      {/* Progress Bar Background */}
+                      {(() => {
+                        const odinData = Object.values(odinDeviceStates).find(d => d.serial === id);
+                        if (odinData && odinData.status === "Flashing...") {
+                          return (
+                            <div 
+                              className="absolute inset-0 bg-blue-500/20 transition-all duration-300 z-0" 
+                              style={{ width: `${odinData.progress}%` }} 
+                            />
+                          );
+                        }
+                        if (odinData && odinData.status === "Pass") {
+                          return (
+                            <div className="absolute inset-0 bg-green-500/10 z-0" />
+                          );
+                        }
+                        return null;
+                      })()}
+
                       {busyDevices.includes(id) && (
                         <div style={{
                           position: 'absolute', top: 12, right: 12,
@@ -831,22 +912,21 @@ export default function App() {
                           boxShadow: '0 0 10px rgba(220,38,38,0.5)'
                         }}>BUSY</div>
                       )}
-                      <div className="flex items-center justify-between mb-5">
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-[17px] font-bold truncate pr-4 leading-tight">{deviceDetails[id]?.['ro.product.model'] || id}</span>
-                          <span className="text-[11px] text-white/25 font-mono tracking-tight">SN: {id}</span>
+                      
+                      <div className="relative z-10">
+                        <div className="flex items-center justify-between mb-5">
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-[17px] font-bold truncate pr-4 leading-tight">{deviceDetails[id]?.['ro.product.model'] || deviceDetails[id]?._model || id}</span>
+                            <span className="text-[11px] text-white/25 font-mono tracking-tight">SN: {id} &bull; {deviceDetails[id]?.usb_port || 'Unknown Port'}</span>
+                          </div>
+                          <div className={`w-6 h-6 border flex items-center justify-center transition-all ${selectedDevices.includes(id) ? 'bg-white border-white' : 'border-white/10'}`}>
+                            {selectedDevices.includes(id) && <Check className="w-3.5 h-3.5 text-black font-black" />}
+                          </div>
                         </div>
-                        <div className={`w-6 h-6 border flex items-center justify-center transition-all ${selectedDevices.includes(id) ? 'bg-white border-white' : 'border-white/10'}`}>
-                          {selectedDevices.includes(id) && <Check className="w-3.5 h-3.5 text-black font-black" />}
+                        <div className="grid grid-cols-2 gap-4 pt-5 border-t border-white/5">
+                          <div className="flex flex-col min-w-0"><span className="text-[9px] opacity-25 uppercase font-black tracking-widest mb-1">PDA</span><span className="text-[11px] font-mono truncate text-blue-400/80">{deviceDetails[id]?.['ro.build.PDA'] || 'N/A'}</span></div>
+                          <div className="flex flex-col min-w-0 items-end"><span className="text-[9px] opacity-25 uppercase font-black tracking-widest mb-1">Region</span><span className="text-[11px] font-mono text-white/60">{deviceDetails[id]?.['ro.csc.sales_code'] || 'N/A'}</span></div>
                         </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4 pt-5 border-t border-white/5">
-                        {deviceDetails[id]?.['ro.build.PDA'] && (
-                          <div className="flex flex-col min-w-0"><span className="text-[9px] opacity-25 uppercase font-black tracking-widest mb-1">PDA</span><span className="text-[11px] font-mono truncate text-blue-400/80">{deviceDetails[id]?.['ro.build.PDA']}</span></div>
-                        )}
-                        {deviceDetails[id]?.['ro.csc.sales_code'] && (
-                          <div className="flex flex-col min-w-0 items-end"><span className="text-[9px] opacity-25 uppercase font-black tracking-widest mb-1">Region</span><span className="text-[11px] font-mono text-white/60">{deviceDetails[id]?.['ro.csc.sales_code']}</span></div>
-                        )}
                       </div>
                     </div>
                   ))
@@ -967,9 +1047,9 @@ export default function App() {
             {/* Emergency Stop Button */}
             <button
               onClick={handleEmergencyStop}
-              className={`w-14 h-14 rounded-full flex items-center justify-center transition-all border shadow-lg ${isStopping || loading
-                ? "bg-red-600 hover:bg-red-500 border-red-400 shadow-red-900/50 animate-pulse"
-                : "bg-red-900/30 hover:bg-red-900/50 border-red-900/50 text-red-500/50 hover:text-red-500"
+              className={`w-14 h-14 rounded-full flex items-center justify-center transition-all border shadow-lg ${isStopping
+                ? "bg-red-600 border-red-400 shadow-[0_0_30px_rgba(239,68,68,0.8)] animate-glow-red"
+                : (loading ? "bg-red-900/40 border-red-600/50 text-red-500 animate-pulse" : "bg-red-900/30 hover:bg-red-900/50 border-red-900/50 text-red-500/50 hover:text-red-500")
                 }`}
               title="EMERGENCY STOP (Cancel All Processes)"
             >
@@ -1004,7 +1084,7 @@ export default function App() {
             <div className={`w-2.5 h-2.5 rounded-full ${devices.length > 0 ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : 'bg-white/10'}`} />
             <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{devices.length} Units Connected</span>
           </div>
-          <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.6.5 &bull; FlashKit By Endri-Pro</span>
+          <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.6.6 &bull; FlashKit By Endri-Pro</span>
         </footer>
 
       </div>

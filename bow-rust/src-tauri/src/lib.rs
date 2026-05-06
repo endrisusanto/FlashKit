@@ -64,6 +64,79 @@ fn odin_list_devices(app: AppHandle) -> Result<Vec<String>, String> {
     Ok(devices)
 }
 
+#[tauri::command]
+fn resolve_usb_path(dev: String) -> String {
+    #[cfg(target_os = "linux")]
+    {
+        let parts: Vec<&str> = dev.split('/').collect();
+        if parts.len() >= 3 {
+            let bus = parts[parts.len() - 2].parse::<u32>().unwrap_or(0);
+            let devnum = parts[parts.len() - 1].parse::<u32>().unwrap_or(0);
+            
+            if bus > 0 && devnum > 0 {
+                if let Ok(entries) = std::fs::read_dir("/sys/bus/usb/devices/") {
+                    for entry in entries.filter_map(Result::ok) {
+                        let path = entry.path();
+                        if let (Ok(b), Ok(d)) = (std::fs::read_to_string(path.join("busnum")), std::fs::read_to_string(path.join("devnum"))) {
+                            if b.trim().parse::<u32>().unwrap_or(0) == bus && d.trim().parse::<u32>().unwrap_or(0) == devnum {
+                                if let Some(name) = path.file_name() {
+                                    return format!("USB:{}", name.to_string_lossy());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let parts: Vec<&str> = dev.split('/').collect();
+    if parts.len() >= 2 {
+        format!("USB:{}-{}", parts[parts.len() - 2], parts[parts.len() - 1])
+    } else {
+        dev
+    }
+}
+
+#[derive(serde::Serialize)]
+pub struct AdbDeviceExt {
+    pub serial: String,
+    pub usb_port: String,
+    pub model: String,
+}
+
+#[tauri::command]
+fn get_adb_devices_advanced() -> Result<Vec<AdbDeviceExt>, String> {
+    let adb_path = find_adb();
+    let output = Command::new(&adb_path)
+        .arg("devices")
+        .arg("-l")
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut devices = Vec::new();
+
+    for line in stdout.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 2 && parts[1] == "device" {
+            let serial = parts[0].to_string();
+            let mut usb_port = "".to_string();
+            let mut model = "".to_string();
+            
+            for p in &parts[2..] {
+                if p.starts_with("usb:") {
+                    usb_port = p.replace("usb:", "USB:");
+                } else if p.starts_with("model:") {
+                    model = p.replace("model:", "");
+                }
+            }
+            
+            devices.push(AdbDeviceExt { serial, usb_port, model });
+        }
+    }
+    Ok(devices)
+}
+
 #[derive(serde::Deserialize)]
 pub struct FlashParams {
     device: String,
@@ -223,16 +296,28 @@ fn get_resource_path(app: tauri::AppHandle, name: String) -> Result<String, Stri
 }
 
 #[tauri::command]
-fn get_device_info(serial: String) -> Result<std::collections::HashMap<String, String>, String> {
+fn get_device_info(
+    serial: String,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let props = vec![
+        "ro.product.model",
+        "ro.build.PDA",
+        "ro.csc.sales_code",
+        "ro.csc.country_code",
+        "ro.build.fingerprint",
+    ];
+
     let mut info = std::collections::HashMap::new();
-    let val = run_adb(vec![
-        "-s".to_string(),
-        serial.clone(),
-        "shell".to_string(),
-        "getprop".to_string(),
-        "ro.product.model".to_string(),
-    ])?;
-    info.insert("ro.product.model".to_string(), val);
+    for prop in props {
+        let val = run_adb(vec![
+            "-s".to_string(),
+            serial.clone(),
+            "shell".to_string(),
+            "getprop".to_string(),
+            prop.to_string(),
+        ])?;
+        info.insert(prop.to_string(), val);
+    }
     Ok(info)
 }
 
@@ -332,46 +417,28 @@ fn get_app_dir() -> String {
     get_exe_dir().to_string_lossy().to_string()
 }
 
-#[derive(serde::Serialize)]
-struct AdbDevice {
-    serial: String,
-    usb: String,
-}
-
 #[tauri::command]
-fn get_devices_with_usb() -> Result<Vec<AdbDevice>, String> {
+fn get_devices() -> Result<Vec<String>, String> {
     let adb_path = find_adb();
     let mut cmd = Command::new(&adb_path);
-    cmd.arg("devices").arg("-l");
+    cmd.arg("devices");
 
     #[cfg(target_os = "windows")]
-    cmd.creation_flags(0x08000000);
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
     let output = cmd.output().map_err(|e| e.to_string())?;
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut devices = Vec::new();
 
     for line in stdout.lines().skip(1) {
-        if line.is_empty() { continue; }
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 2 && parts[1] == "device" {
-            let serial = parts[0].to_string();
-            let mut usb = String::new();
-            for p in parts {
-                if p.starts_with("usb:") {
-                    usb = p.replace("usb:", "");
-                }
-            }
-            devices.push(AdbDevice { serial, usb });
+        if parts.len() == 2 && parts[1] == "device" {
+            devices.push(parts[0].to_string());
         }
     }
-    Ok(devices)
-}
 
-#[tauri::command]
-fn get_devices() -> Result<Vec<String>, String> {
-    let list = get_devices_with_usb()?;
-    Ok(list.into_iter().map(|d| d.serial).collect())
+    Ok(devices)
 }
 
 #[tauri::command]
@@ -509,6 +576,11 @@ fn get_busy_devices() -> Vec<String> {
 }
 
 #[tauri::command]
+fn reset_busy_devices() {
+    write_busy_set(&std::collections::HashSet::new());
+}
+
+#[tauri::command]
 fn emergency_stop() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -544,14 +616,15 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // ADB / Provisioning commands
             get_devices,
-            get_devices_with_usb,
             run_adb,
             get_adb_version,
             get_app_dir,
             get_serial_ports,
+            get_samsung_ports,
+            resolve_usb_path,
+            get_adb_devices_advanced,
             send_at_command,
             get_resource_path,
-            get_samsung_ports,
             get_device_info,
             // Odin flash commands
             odin_list_devices,
@@ -561,6 +634,7 @@ pub fn run() {
             mark_busy,
             clear_busy,
             get_busy_devices,
+            reset_busy_devices,
             emergency_stop
         ])
         .run(tauri::generate_context!())

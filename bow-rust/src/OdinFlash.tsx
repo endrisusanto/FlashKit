@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "re
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { ShieldAlert, RefreshCw } from "lucide-react";
 import "./OdinFlash.css";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -16,7 +17,7 @@ interface FilePaths {
   userdata: string;
 }
 
-interface DeviceData {
+export interface DeviceData {
   path: string;
   port: string;
   status: "Ready" | "Flashing..." | "Pass" | "Fail";
@@ -24,10 +25,12 @@ interface DeviceData {
   log: string;
   checked: boolean;
   busyByOther?: boolean;
+  serial?: string;
+  model?: string;
 }
 
 export interface OdinFlashRef {
-  startFlash: () => Promise<number | null>;
+  startFlash: () => Promise<boolean>;
   hasCheckedDevices: () => boolean;
 }
 
@@ -39,11 +42,7 @@ function getTimestamp() {
   return `[${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}]`;
 }
 
-function extractUsbPort(path: string) {
-  const parts = path.split("/");
-  if (parts.length >= 2) return `USB:${parts[parts.length - 2]}-${parts[parts.length - 1]}`;
-  return path;
-}
+// Removed extractUsbPort as it is replaced by Rust resolve_usb_path
 
 const SLOT_LABELS: Record<SlotKey, string> = {
   bl: "BL",
@@ -55,7 +54,13 @@ const SLOT_LABELS: Record<SlotKey, string> = {
 
 // ── Component ──────────────────────────────────────────────────────────
 
-const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
+export interface OdinFlashProps {
+  selectedSerials?: string[];
+  setSelectedSerials?: React.Dispatch<React.SetStateAction<string[]>>;
+  onDevicesUpdate?: (devices: Record<string, DeviceData>) => void;
+}
+
+const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ selectedSerials, setSelectedSerials, onDevicesUpdate }, ref) => {
   const [filePaths, setFilePaths] = useState<FilePaths>({ bl: "", ap: "", cp: "", csc: "", userdata: "" });
   const [verifyState, setVerifyState] = useState<Record<SlotKey, { text: string; progress: number; verifying: boolean }>>({
     bl: { text: "", progress: 0, verifying: false },
@@ -71,18 +76,26 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
 
   const devicesRef = useRef(devices);
   const isFlashingRef = useRef(isFlashing);
+  const selectedSerialsRef = useRef(selectedSerials);
   devicesRef.current = devices;
   isFlashingRef.current = isFlashing;
+  selectedSerialsRef.current = selectedSerials;
 
   useImperativeHandle(ref, () => ({
     startFlash: async () => {
-      const res = await startFlashInternal();
-      return res;
+      return await startFlashInternal();
     },
     hasCheckedDevices: () => {
       return Object.values(devicesRef.current).some(d => d.checked);
     }
   }));
+
+  // Sync devices update back to parent
+  useEffect(() => {
+    if (onDevicesUpdate) {
+      onDevicesUpdate(devices);
+    }
+  }, [devices, onDevicesUpdate]);
 
   // ── Busy device polling (cross-instance) ──────────────────────────────
 
@@ -98,26 +111,53 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
     return () => clearInterval(interval);
   }, []);
 
+  const resetBusy = async () => {
+    try {
+      await invoke("reset_busy_devices");
+      const busy: string[] = await invoke("get_busy_devices");
+      setBusyDevices(busy);
+    } catch { }
+  };
+
   // ── Odin device scanning ──────────────────────────────────────────────────────
 
   async function scanDevices() {
     if (isFlashingRef.current) return;
     try {
       const list: string[] = await invoke("odin_list_devices");
+      const resolvedPorts: Record<string, string> = {};
+      for (const dev of list) {
+        resolvedPorts[dev] = await invoke("resolve_usb_path", { dev });
+      }
+      
       setDevices(prev => {
         const updated = { ...prev };
-        list.forEach(dev => {
+        for (const dev of list) {
           if (!updated[dev]) {
+            const port = resolvedPorts[dev];
+            let serial = undefined;
+            let model = undefined;
+            try {
+              const history = localStorage.getItem('port_history_' + port);
+              if (history) {
+                const parsed = JSON.parse(history);
+                serial = parsed.serial;
+                model = parsed.model;
+              }
+            } catch (e) {}
+
             updated[dev] = {
               path: dev,
-              port: extractUsbPort(dev),
+              port: port,
+              serial,
+              model,
               status: "Ready",
               progress: 0,
-              checked: false,
+              checked: serial ? (selectedSerialsRef.current?.includes(serial) ?? false) : false,
               log: `${getTimestamp()} Attached at ${dev}\n${getTimestamp()} Waiting for flash command...`,
             };
           }
-        });
+        }
         return updated;
       });
     } catch (e) {
@@ -135,6 +175,26 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
     const interval = setInterval(scanDevices, 2000);
     return () => clearInterval(interval);
   }, []);
+
+  // Sync with App.tsx checked state
+  useEffect(() => {
+    if (selectedSerials) {
+      setDevices(prev => {
+        let changed = false;
+        const next = { ...prev };
+        for (const [key, dev] of Object.entries(next)) {
+          if (dev.serial) {
+            const shouldBeChecked = selectedSerials.includes(dev.serial);
+            if (dev.checked !== shouldBeChecked) {
+              next[key] = { ...dev, checked: shouldBeChecked };
+              changed = true;
+            }
+          }
+        }
+        return changed ? next : prev;
+      });
+    }
+  }, [selectedSerials]);
 
   // ── Listen flash progress events ─────────────────────────────────────
 
@@ -279,13 +339,13 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
 
   // ── Flash ─────────────────────────────────────────────────────────────
 
-  async function startFlashInternal(): Promise<number | null> {
+  async function startFlashInternal(): Promise<boolean> {
     const checked = Object.entries(devicesRef.current).filter(([, d]) => d.checked);
-    if (checked.length === 0) return null;
+    if (checked.length === 0) return false;
 
     if (!filePaths.bl && !filePaths.ap && !filePaths.cp && !filePaths.csc && !filePaths.userdata) {
       alert("Tidak ada file firmware yang dipilih di tab Odin Flash! Silakan pilih file tar.md5 terlebih dahulu.");
-      return null;
+      return false;
     }
 
     setIsFlashing(true);
@@ -295,6 +355,7 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
     try { await invoke("mark_busy", { serials: checkedSerials }); } catch { }
 
     let anyFail = false;
+    let anyPass = false;
 
     await Promise.all(
       checked.map(async ([dev]) => {
@@ -318,6 +379,7 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
             ...prev,
             [dev]: { ...prev[dev], status: "Pass", progress: 100, log: prev[dev].log + `\n${getTimestamp()} ${result}` },
           }));
+          anyPass = true;
         } catch (err) {
           setDevices(prev => ({
             ...prev,
@@ -328,9 +390,11 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
       })
     );
 
-    // Jangan hapus busy flag Odin
+    // Hapus busy flag setelah selesai
+    try { await invoke("clear_busy", { serials: checkedSerials }); } catch { }
+
     setIsFlashing(false);
-    return anyFail ? null : checked.length;
+    return !anyFail && anyPass;
   }
 
   // ── UI (Original Odin-Clone Style) ────────────────────────────────────
@@ -378,7 +442,19 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
                     onClick={(e) => {
                       e.stopPropagation();
                       if (!isFlashing && !(busyDevices.includes(dev) && data.status === "Ready")) {
-                        setDevices(prev => ({ ...prev, [dev]: { ...prev[dev], checked: !prev[dev].checked } }));
+                        const newChecked = !data.checked;
+                        setDevices(prev => ({ ...prev, [dev]: { ...prev[dev], checked: newChecked } }));
+                        
+                        // Sync back to App.tsx if serial is known
+                        if (data.serial && setSelectedSerials) {
+                          setSelectedSerials(prev => {
+                            if (newChecked) {
+                              return prev.includes(data.serial!) ? prev : [...prev, data.serial!];
+                            } else {
+                              return prev.filter(s => s !== data.serial);
+                            }
+                          });
+                        }
                       }
                     }}
                   >
@@ -388,7 +464,7 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
                     </div>
                   </div>
                   <h3 className="dev-title">
-                    Device:
+                    {data.model || "Device"}
                     <span className={
                       data.status === "Pass" ? "dev-status-success" :
                       data.status === "Fail" ? "dev-status-fail" :
@@ -397,7 +473,7 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
                     }>{data.status}</span>
                   </h3>
                   <p className="dev-path">
-                    {data.port}
+                    {data.port} {data.serial ? `(${data.serial})` : ''}
                     <span style={{ fontWeight: 600 }}>{data.progress}%</span>
                   </p>
                 </div>
@@ -451,9 +527,12 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
           </div>
         </button>
         <button className="btn-icon" title="Refresh Devices" onClick={forceRefresh} disabled={isFlashing}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+          <RefreshCw width={20} height={20} />
         </button>
-        <button className="btn-icon" style={{ marginLeft: "8px" }} title="Clear files" onClick={clearFiles} disabled={isFlashing}>
+        <button className="btn-icon" style={{ color: "#ff453a" }} title="Reset Busy Status" onClick={resetBusy} disabled={isFlashing}>
+          <ShieldAlert width={20} height={20} />
+        </button>
+        <button className="btn-icon" title="Clear files" onClick={clearFiles} disabled={isFlashing}>
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
         </button>
       </div>

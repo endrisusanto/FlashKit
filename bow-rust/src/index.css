@@ -38,6 +38,15 @@
   animation: flash 0.3s ease-in-out;
 }
 
+@keyframes glow-red {
+  0% { box-shadow: 0 0 5px rgba(239, 68, 68, 0.5), 0 0 10px rgba(239, 68, 68, 0.5); }
+  50% { box-shadow: 0 0 20px rgba(239, 68, 68, 1), 0 0 40px rgba(239, 68, 68, 0.8); }
+  100% { box-shadow: 0 0 5px rgba(239, 68, 68, 0.5), 0 0 10px rgba(239, 68, 68, 0.5); }
+}
+.animate-glow-red {
+  animation: glow-red 1.5s infinite ease-in-out;
+}
+
 * {
   margin: 0px;
   padding: 3px;
