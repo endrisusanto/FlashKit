@@ -27,7 +27,7 @@ interface DeviceData {
 }
 
 export interface OdinFlashRef {
-  startFlash: () => Promise<boolean>;
+  startFlash: () => Promise<string[] | null>;
   hasCheckedDevices: () => boolean;
 }
 
@@ -295,7 +295,6 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
     try { await invoke("mark_busy", { serials: checkedSerials }); } catch { }
 
     let anyFail = false;
-    let anyPass = false;
 
     await Promise.all(
       checked.map(async ([dev]) => {
@@ -319,7 +318,6 @@ const OdinFlash = forwardRef<OdinFlashRef>((_, ref) => {
             ...prev,
             [dev]: { ...prev[dev], status: "Pass", progress: 100, log: prev[dev].log + `\n${getTimestamp()} ${result}` },
           }));
-          anyPass = true;
         } catch (err) {
           setDevices(prev => ({
             ...prev,
