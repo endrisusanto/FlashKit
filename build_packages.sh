@@ -15,8 +15,8 @@ fi
 # Detect OS and set appropriate bundles
 OS_TYPE="$(uname -s)"
 if [[ "$OS_TYPE" == "Linux" ]]; then
-  echo "Detected Linux - Building DEB, RPM, and AppImage"
-  BUNDLES="deb,rpm,appimage"
+  echo "Detected Linux - Building DEB and RPM"
+  BUNDLES="deb,rpm"
 elif [[ "$OS_TYPE" == *"MINGW"* ]] || [[ "$OS_TYPE" == *"MSYS"* ]] || [[ "$OS_TYPE" == *"CYGWIN"* ]]; then
   echo "Detected Windows - Building EXE (NSIS)"
   BUNDLES="nsis"

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -58,9 +58,10 @@ export interface OdinFlashProps {
   selectedSerials?: string[];
   setSelectedSerials?: React.Dispatch<React.SetStateAction<string[]>>;
   onDevicesUpdate?: (devices: Record<string, DeviceData>) => void;
+  onVerifyProgress?: (progress: number) => void;
 }
 
-const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ selectedSerials, setSelectedSerials, onDevicesUpdate }, ref) => {
+const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ selectedSerials, setSelectedSerials, onDevicesUpdate, onVerifyProgress }, ref) => {
   const [filePaths, setFilePaths] = useState<FilePaths>({ bl: "", ap: "", cp: "", csc: "", userdata: "" });
   const [verifyState, setVerifyState] = useState<Record<SlotKey, { text: string; progress: number; verifying: boolean }>>({
     bl: { text: "", progress: 0, verifying: false },
@@ -96,6 +97,16 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ selectedSerials, s
       onDevicesUpdate(devices);
     }
   }, [devices, onDevicesUpdate]);
+
+  const overallVerifyProgress = useMemo(() => {
+    const verifying = Object.values(verifyState).filter(s => s.verifying);
+    if (verifying.length === 0) return 0;
+    return verifying.reduce((acc, s) => acc + s.progress, 0) / verifying.length;
+  }, [verifyState]);
+
+  useEffect(() => {
+    if (onVerifyProgress) onVerifyProgress(overallVerifyProgress);
+  }, [overallVerifyProgress, onVerifyProgress]);
 
   // ── Busy device polling (cross-instance) ──────────────────────────────
 

@@ -55,7 +55,7 @@ const startConfettiLoop = (onStop?: () => void) => {
   }, 500);
 };
 
-const BouncingTimer = ({ startTime, active, isFinished }: { startTime: number, active: boolean, isFinished: boolean }) => {
+const BouncingTimer = ({ startTime, active, isFinished, onClose }: { startTime: number, active: boolean, isFinished: boolean, onClose?: () => void }) => {
   const requestRef = useRef<number>(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const timeTextRef = useRef<HTMLSpanElement>(null);
@@ -128,13 +128,21 @@ const BouncingTimer = ({ startTime, active, isFinished }: { startTime: number, a
   return (
     <div 
       ref={containerRef}
-      className={`fixed top-0 left-0 z-[10000] pointer-events-none select-none transition-all duration-500 rounded-[2rem] ${
+      onClick={() => { if (isFinished && onClose) onClose(); }}
+      className={`fixed top-0 left-0 z-[10000] select-none transition-all duration-500 rounded-[2rem] ${
         isFinished 
-          ? "bg-[#111] border-[3px] border-green-500 shadow-[0_0_100px_rgba(34,197,94,0.4)] px-16 py-10" 
-          : "bg-blue-500/10 backdrop-blur-xl border border-blue-500/40 px-8 py-4 shadow-[0_0_40px_rgba(59,130,246,0.3)]"
+          ? "bg-[#111] border-[3px] border-green-500 shadow-[0_0_100px_rgba(34,197,94,0.4)] px-16 py-10 pointer-events-auto cursor-pointer hover:border-green-400 hover:shadow-[0_0_120px_rgba(34,197,94,0.6)] group" 
+          : "bg-blue-500/10 backdrop-blur-xl border border-blue-500/40 px-8 py-4 shadow-[0_0_40px_rgba(59,130,246,0.3)] pointer-events-none"
       }`}
       style={{ opacity: (active || isFinished) ? 1 : 0, transform: `translate(${posRef.current.x}px, ${posRef.current.y}px)${isFinished ? ' scale(1.3)' : ' scale(1)'}` }}
     >
+      {isFinished && (
+        <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-white/50 hover:text-white hover:bg-red-500/80 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col items-center">
         <div className="flex items-center gap-3 mb-2">
           <div className={`w-2 h-2 rounded-full ${isFinished ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,1)]' : 'bg-blue-500 animate-ping'}`} />
@@ -922,13 +930,13 @@ export default function App() {
         )}
 
         {/* ── NAVBAR ── */}
-        <header className="flex items-center justify-center px-10 h-20 bg-[#0d0d0d] border-b border-[#222] shrink-0" data-tauri-drag-region>
+        <header className="flex items-center justify-center px-4 md:px-10 h-16 md:h-20 bg-[#0d0d0d] border-b border-[#222] shrink-0" data-tauri-drag-region>
           {/* Tabs - Centered */}
-          <div className="flex h-full gap-4">
+          <div className="flex h-full gap-2 md:gap-4">
             <button
               id="tab-provisioning"
               onClick={() => setActiveTab("provisioning")}
-              className={`h-full px-12 text-[13px] font-black uppercase tracking-[0.2em] border-b-[3px] transition-all ${activeTab === "provisioning"
+              className={`h-full px-6 md:px-12 text-[11px] md:text-[13px] font-black uppercase tracking-[0.1em] md:tracking-[0.2em] border-b-[3px] transition-all ${activeTab === "provisioning"
                 ? "border-white text-white bg-white/[0.02]"
                 : "border-transparent text-white/30 hover:text-white/60 hover:bg-white/[0.01]"
                 }`}
@@ -938,7 +946,7 @@ export default function App() {
             <button
               id="tab-odin"
               onClick={() => setActiveTab("odin")}
-              className={`h-full px-12 text-[13px] font-black uppercase tracking-[0.2em] border-b-[3px] transition-all relative overflow-hidden ${activeTab === "odin"
+              className={`h-full px-6 md:px-12 text-[11px] md:text-[13px] font-black uppercase tracking-[0.1em] md:tracking-[0.2em] border-b-[3px] transition-all relative overflow-hidden ${activeTab === "odin"
                 ? "border-blue-500 text-blue-400 bg-blue-500/[0.02]"
                 : "border-transparent text-white/30 hover:text-white/60 hover:bg-white/[0.01]"
                 }`}
@@ -955,8 +963,8 @@ export default function App() {
         </header>
 
         {/* Always mount OdinFlash to retain state and refs, but hide it if not active */}
-        <div className={activeTab === "odin" ? "flex-1 flex flex-col min-h-0 p-8" : "hidden"}>
-          <div className="flex-1 flex flex-col bg-[#121212] border border-[#222] rounded-3xl p-8 overflow-hidden shadow-inner">
+        <div className={activeTab === "odin" ? "flex-1 flex flex-col min-h-0 p-3 md:p-8" : "hidden"}>
+          <div className="flex-1 flex flex-col bg-[#121212] border border-[#222] rounded-xl md:rounded-3xl p-3 md:p-8 overflow-hidden shadow-inner">
             <OdinFlash 
               ref={odinRef} 
               selectedSerials={selectedDevices}
@@ -967,10 +975,10 @@ export default function App() {
           </div>
         </div>
 
-        <main className={activeTab === "provisioning" ? "flex-1 flex min-h-0 p-8 overflow-hidden" : "hidden"}>
-          <div className="flex-1 flex bg-[#121212] border border-[#222] rounded-3xl p-8 gap-2 overflow-hidden shadow-inner">
+        <main className={activeTab === "provisioning" ? "flex-1 flex min-h-0 p-3 md:p-8 overflow-hidden" : "hidden"}>
+          <div className="flex-1 flex flex-col md:flex-row bg-[#121212] border border-[#222] rounded-xl md:rounded-3xl p-4 md:p-8 gap-4 overflow-y-auto md:overflow-hidden shadow-inner custom-scrollbar">
             {/* Left: Device Pool */}
-            <div className="w-1/3 min-w-[350px] max-w-[500px] flex flex-col gap-8 shrink-0">
+            <div className="w-full md:w-1/3 md:min-w-[350px] md:max-w-[500px] flex flex-col gap-4 md:gap-8 shrink-0 min-h-[300px] md:min-h-0">
               <div className="flex flex-col gap-3">
                 <h3 className="text-[11px] font-black text-white/40 uppercase tracking-widest text-center">Daftar Perangkat ({devices.length})</h3>
                 <div className="flex items-center justify-center gap-3 px-2">
@@ -996,7 +1004,7 @@ export default function App() {
                     <div
                       key={id}
                       onClick={() => !busyDevices.includes(id) && toggleDevice(id)}
-                      className={`p-7 rounded-2xl border transition-all cursor-pointer relative overflow-hidden ${busyDevices.includes(id) ? 'opacity-50 grayscale cursor-not-allowed border-white/5 bg-white/5' : selectedDevices.includes(id) ? 'border-white shadow-[0_0_15px_rgba(255,255,255,0.25)]' : 'border-[#222] hover:border-white/10'}`}
+                      className={`p-4 md:p-7 rounded-xl md:rounded-2xl border transition-all cursor-pointer relative overflow-hidden ${busyDevices.includes(id) ? 'opacity-50 grayscale cursor-not-allowed border-white/5 bg-white/5' : selectedDevices.includes(id) ? 'border-white shadow-[0_0_15px_rgba(255,255,255,0.25)]' : 'border-[#222] hover:border-white/10'}`}
                     >
                       {/* Progress Bar Background */}
                       {(() => {
@@ -1050,26 +1058,26 @@ export default function App() {
             </div>
 
             {/* Right: Dashboard */}
-            <div className="flex-1 flex flex-col gap-10 min-w-0">
+            <div className="flex-1 flex flex-col gap-6 md:gap-10 min-w-0">
 
               {/* WIFI CONFIG CARD */}
-              <div className="p-8 bg-[#181818] border border-[#2a2a2a] rounded-2xl">
+              <div className="p-4 md:p-8 bg-[#181818] border border-[#2a2a2a] rounded-xl md:rounded-2xl">
                 <div className="flex items-center justify-center mb-6">
                   <div className="flex items-center gap-3">
                     <Wifi className="w-5 h-5 text-white/40" />
                     <span className="text-[12px] font-black uppercase tracking-widest text-white/40">Pengaturan WiFi</span>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-8">
-                  <input value={ssid} onChange={e => setSsid(e.target.value)} className="win-input px-6 py-4 rounded-xl" placeholder="Nama WiFi (SSID)" />
-                  <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="win-input px-6 py-4 rounded-xl" placeholder="Kata Sandi" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-8">
+                  <input value={ssid} onChange={e => setSsid(e.target.value)} className="win-input px-4 md:px-6 py-3 md:py-4 rounded-xl text-sm" placeholder="Nama WiFi (SSID)" />
+                  <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="win-input px-4 md:px-6 py-3 md:py-4 rounded-xl text-sm" placeholder="Kata Sandi" />
                 </div>
               </div>
 
               {/* MASTER SEQUENCE CARD */}
-              <div className="p-8 bg-[#181818] border border-[#2a2a2a] rounded-2xl relative overflow-hidden">
-                <div className="flex items-center justify-center mb-10">
-                  <div className="flex items-center gap-2">
+              <div className="p-4 md:p-8 bg-[#181818] border border-[#2a2a2a] rounded-xl md:rounded-2xl relative overflow-hidden">
+                <div className="flex items-center justify-center mb-6 md:mb-10">
+                  <div className="flex items-center gap-1 md:gap-2 flex-wrap justify-center">
                     <div className={`flex items-center gap-2 transition-all duration-500 ${!seqOdin ? 'hidden' : ''} ${currentStep === 0 ? 'opacity-100 text-orange-400 drop-shadow-[0_0_8px_rgba(251,146,60,0.8)]' : (currentStep && currentStep > 0 ? 'opacity-50 text-white' : 'opacity-30 text-white')}`}>
                       <span className={`text-[10px] font-black uppercase tracking-widest`}>Odin Flash</span>
                       <ChevronRight className="w-3 h-3" />
@@ -1088,9 +1096,9 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-8">
-                  <div className="grid grid-cols-4 gap-6">
-                    <div onClick={() => !loading && setSeqOdin(!seqOdin)} className={`p-6 border rounded-xl transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqOdin ? 'border-orange-500 bg-orange-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}>
+                <div className="flex flex-col gap-4 md:gap-8">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-6">
+                    <div onClick={() => !loading && setSeqOdin(!seqOdin)} className={`p-3 md:p-6 border rounded-xl transition-all cursor-pointer flex flex-col items-center justify-center gap-2 md:gap-4 ${seqOdin ? 'border-orange-500 bg-orange-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}>
                       <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqOdin ? 'bg-orange-500 border-orange-500 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'border-white/20'}`}>
                         {seqOdin && <Check className="w-5 h-5 text-white" strokeWidth={4} />}
                       </div>
@@ -1112,11 +1120,11 @@ export default function App() {
                       <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqWifi ? 'bg-green-500 border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.5)]' : 'border-white/20'}`}>
                         {seqWifi && <Check className="w-5 h-5 text-white" strokeWidth={4} />}
                       </div>
-                      <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqWifi ? 'text-green-400' : 'text-white/40'}`}>WiFi Connect</span>
+                      <span className={`text-[9px] md:text-[11px] font-black uppercase tracking-widest text-center ${seqWifi ? 'text-green-400' : 'text-white/40'}`}>WiFi Connect</span>
                     </div>
                   </div>
-                  <button onClick={() => runMasterSequence()} disabled={loading || (!seqOdin && !seqSkipWz && !seqGba && !seqWifi)} className={`w-full mt-2 py-6 rounded-xl transition-all font-black uppercase tracking-widest text-[16px] flex items-center justify-center gap-4 border-2 ${loading ? 'bg-[#111] border-[#333] text-white/40 cursor-not-allowed' : 'bg-white text-black border-white hover:bg-gray-200 disabled:opacity-30'}`}>
-                    {loading && currentStep !== null ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Play className="w-6 h-6" />}
+                  <button onClick={() => runMasterSequence()} disabled={loading || (!seqOdin && !seqSkipWz && !seqGba && !seqWifi)} className={`w-full mt-2 py-4 md:py-6 rounded-xl transition-all font-black uppercase tracking-widest text-[14px] md:text-[16px] flex items-center justify-center gap-3 md:gap-4 border-2 ${loading ? 'bg-[#111] border-[#333] text-white/40 cursor-not-allowed' : 'bg-white text-black border-white hover:bg-gray-200 disabled:opacity-30'}`}>
+                    {loading && currentStep !== null ? <RefreshCw className="w-5 md:w-6 h-5 md:h-6 animate-spin" /> : <Play className="w-5 md:w-6 h-5 md:h-6" />}
                     <span>{loading && currentStep !== null ? 'Memproses...' : 'Jalankan Automasi'}</span>
                   </button>
                 </div>
@@ -1124,15 +1132,15 @@ export default function App() {
               </div>
 
               {/* System Log */}
-              <div className="flex-1 bg-black border border-[#2a2a2a] rounded-2xl flex flex-col min-h-0 overflow-hidden shadow-lg">
-                <div className="flex items-center justify-between px-8 h-8 bg-white/5 border-b border-[#2a2a2a]">
+              <div className="flex-1 bg-black border border-[#2a2a2a] rounded-xl md:rounded-2xl flex flex-col min-h-[250px] md:min-h-0 overflow-hidden shadow-lg mt-2 md:mt-0">
+                <div className="flex items-center justify-between px-4 md:px-8 h-8 bg-white/5 border-b border-[#2a2a2a]">
                   <div className="flex-1 flex items-center justify-center gap-3">
                     <Terminal className="w-4 h-4 text-blue-500" />
                     <span className="text-[11px] font-black uppercase tracking-widest">Log Sistem</span>
                   </div>
-                  <button onClick={() => setLogs([])} className="text-[10px] font-black text-white/20 hover:text-white px-3 py-1 bg-white/5 rounded transition-all">CLEAR</button>
+                  <button onClick={() => setLogs([])} className="text-[10px] font-black text-white/20 hover:text-white px-2 md:px-3 py-1 bg-white/5 rounded transition-all">CLEAR</button>
                 </div>
-                <div className="flex-1 overflow-y-auto p-6 font-mono text-[13px] select-text leading-relaxed custom-scrollbar">
+                <div className="flex-1 overflow-y-auto p-4 md:p-6 font-mono text-[11px] md:text-[13px] select-text leading-relaxed custom-scrollbar">
                   {logs.length === 0 ? (
                     <div className="h-full flex items-center justify-center text-white/5 uppercase tracking-[0.5em] font-black italic">Ready</div>
                   ) : (
@@ -1158,11 +1166,11 @@ export default function App() {
           </div>
 
           {/* ── FLOATING ACTION BUTTONS ── */}
-          <div className="absolute bottom-20 right-8 flex flex-col gap-4 z-40">
+          <div className="absolute bottom-16 md:bottom-20 right-6 md:right-8 flex flex-col gap-3 md:gap-4 z-40">
             {/* Emergency Stop Button */}
             <button
               onClick={handleEmergencyStop}
-              className={`w-14 h-14 rounded-full flex items-center justify-center transition-all border shadow-lg ${isStopping
+              className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all border shadow-lg ${isStopping
                 ? "bg-red-600 border-red-400 shadow-[0_0_30px_rgba(239,68,68,0.8)] animate-glow-red"
                 : (loading ? "bg-red-900/40 border-red-600/50 text-red-500 animate-pulse" : "bg-red-900/30 hover:bg-red-900/50 border-red-900/50 text-red-500/50 hover:text-red-500")
                 }`}
@@ -1186,10 +1194,10 @@ export default function App() {
                   setLoading(false);
                 }
               }}
-              className="w-14 h-14 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-[0_0_30px_rgba(37,99,235,0.5)] flex items-center justify-center transition-transform hover:scale-110 active:scale-95 border border-blue-400"
+              className="w-12 h-12 md:w-14 md:h-14 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-[0_0_30px_rgba(37,99,235,0.5)] flex items-center justify-center transition-transform hover:scale-110 active:scale-95 border border-blue-400"
               title="Force Download Mode"
             >
-              <Download className="w-6 h-6" />
+              <Download className="w-5 h-5 md:w-6 md:h-6" />
             </button>
           </div>
         </main>
@@ -1198,6 +1206,7 @@ export default function App() {
           startTime={timerState.startTime} 
           active={timerState.active} 
           isFinished={timerState.isFinished} 
+          onClose={() => setTimerState({ active: false, startTime: 0, isFinished: false })}
         />
 
         <footer className="h-10 bg-[#0d0d0d] border-t border-[#222] flex items-center px-8 justify-between shrink-0 relative z-50">
@@ -1205,7 +1214,7 @@ export default function App() {
             <div className={`w-2.5 h-2.5 rounded-full ${devices.length > 0 ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : 'bg-white/10'}`} />
             <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{devices.length} Units Connected</span>
           </div>
-          <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.7.0 &bull; FlashKit By Endri-Pro</span>
+          <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.8.0 &bull; FlashKit By Endri-Pro</span>
         </footer>
 
       </div>
