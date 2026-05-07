@@ -53,4 +53,4 @@ jobs:
           releaseBody: '${{ steps.commit_msg.outputs.msg }}'
           releaseDraft: false
           prerelease: false
-          args: ${{ matrix.platform == 'windows-latest' && '--bundles nsis' || '--bundles deb,rpm' }}
+          args: ${{ matrix.platform == 'windows-latest' && '--bundles nsis' || '--bundles deb,rpm,appimage' }}
