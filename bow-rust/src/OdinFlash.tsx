@@ -55,13 +55,14 @@ const SLOT_LABELS: Record<SlotKey, string> = {
 // ── Component ──────────────────────────────────────────────────────────
 
 export interface OdinFlashProps {
+  allSerials?: string[];
   selectedSerials?: string[];
   setSelectedSerials?: React.Dispatch<React.SetStateAction<string[]>>;
   onDevicesUpdate?: (devices: Record<string, DeviceData>) => void;
   onVerifyProgress?: (progress: number) => void;
 }
 
-const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ selectedSerials, setSelectedSerials, onDevicesUpdate, onVerifyProgress }, ref) => {
+const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, selectedSerials, setSelectedSerials, onDevicesUpdate, onVerifyProgress }, ref) => {
   const [filePaths, setFilePaths] = useState<FilePaths>({ bl: "", ap: "", cp: "", csc: "", userdata: "" });
   const [verifyState, setVerifyState] = useState<Record<SlotKey, { text: string; progress: number; verifying: boolean }>>({
     bl: { text: "", progress: 0, verifying: false },
@@ -193,8 +194,11 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ selectedSerials, s
       setDevices(prev => {
         let changed = false;
         const next = { ...prev };
+        let matchedBySerial = false;
+        
         for (const [key, dev] of Object.entries(next)) {
           if (dev.serial) {
+            matchedBySerial = true;
             const shouldBeChecked = selectedSerials.includes(dev.serial);
             if (dev.checked !== shouldBeChecked) {
               next[key] = { ...dev, checked: shouldBeChecked };
@@ -202,10 +206,27 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ selectedSerials, s
             }
           }
         }
+        
+        // Fallback for Windows where serial cannot be resolved from COM port
+        if (!matchedBySerial && allSerials && allSerials.length > 0) {
+          const odinKeys = Object.keys(next);
+          for (let i = 0; i < odinKeys.length; i++) {
+            const key = odinKeys[i];
+            const adbSerialForThisIndex = allSerials[i];
+            if (adbSerialForThisIndex) {
+              const shouldBeChecked = selectedSerials.includes(adbSerialForThisIndex);
+              if (next[key].checked !== shouldBeChecked) {
+                next[key] = { ...next[key], checked: shouldBeChecked };
+                changed = true;
+              }
+            }
+          }
+        }
+
         return changed ? next : prev;
       });
     }
-  }, [selectedSerials]);
+  }, [selectedSerials, allSerials]);
 
   // ── Listen flash progress events ─────────────────────────────────────
 
@@ -456,15 +477,31 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ selectedSerials, s
                         const newChecked = !data.checked;
                         setDevices(prev => ({ ...prev, [dev]: { ...prev[dev], checked: newChecked } }));
                         
-                        // Sync back to App.tsx if serial is known
-                        if (data.serial && setSelectedSerials) {
-                          setSelectedSerials(prev => {
-                            if (newChecked) {
-                              return prev.includes(data.serial!) ? prev : [...prev, data.serial!];
-                            } else {
-                              return prev.filter(s => s !== data.serial);
+                        // Sync back to App.tsx
+                        if (setSelectedSerials) {
+                          if (data.serial) {
+                            setSelectedSerials(prev => {
+                              if (newChecked) {
+                                return prev.includes(data.serial!) ? prev : [...prev, data.serial!];
+                              } else {
+                                return prev.filter(s => s !== data.serial);
+                              }
+                            });
+                          } else if (allSerials) {
+                            // Windows fallback: match by index
+                            const odinKeys = Object.keys(devices);
+                            const idx = odinKeys.indexOf(dev);
+                            const adbSerial = allSerials[idx];
+                            if (adbSerial) {
+                              setSelectedSerials(prev => {
+                                if (newChecked) {
+                                  return prev.includes(adbSerial) ? prev : [...prev, adbSerial];
+                                } else {
+                                  return prev.filter(s => s !== adbSerial);
+                                }
+                              });
                             }
-                          });
+                          }
                         }
                       }
                     }}
