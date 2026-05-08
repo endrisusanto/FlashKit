@@ -148,7 +148,7 @@ pub struct FlashParams {
 }
 
 #[tauri::command]
-async fn odin_flash_device(
+fn odin_flash_device(
     app: AppHandle,
     window: Window,
     params: FlashParams,
@@ -207,7 +207,7 @@ async fn odin_flash_device(
 }
 
 #[tauri::command]
-async fn odin_check_file(
+fn odin_check_file(
     app: AppHandle,
     window: Window,
     path: String,
