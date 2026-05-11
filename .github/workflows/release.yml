@@ -51,6 +51,6 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'FlashKit ${{ github.ref_name }}'
           releaseBody: '${{ steps.commit_msg.outputs.msg }}'
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           args: ${{ matrix.platform == 'windows-latest' && '--bundles nsis' || '--bundles deb,rpm,appimage' }}

@@ -119,7 +119,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       } catch { }
     };
     poll();
-    const interval = setInterval(poll, 2000);
+    const interval = setInterval(poll, 4000);
     return () => clearInterval(interval);
   }, []);
 
@@ -184,7 +184,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
 
   useEffect(() => {
     scanDevices();
-    const interval = setInterval(scanDevices, 2000);
+    const interval = setInterval(scanDevices, 4000);
     return () => clearInterval(interval);
   }, []);
 
@@ -228,7 +228,42 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     }
   }, [selectedSerials, allSerials]);
 
-  // ── Listen flash progress events ─────────────────────────────────────
+  // ── Listen flash progress events (THROTTLED) ─────────────────────────
+
+  const pendingUpdatesRef = useRef<Record<string, { progress: number, newLogLines: string[] }>>({});
+  const updateIntervalRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!updateIntervalRef.current) {
+      updateIntervalRef.current = setInterval(() => {
+        if (Object.keys(pendingUpdatesRef.current).length > 0) {
+          setDevices(prev => {
+            let changed = false;
+            const next = { ...prev };
+            for (const dev in pendingUpdatesRef.current) {
+              if (next[dev]) {
+                const updates = pendingUpdatesRef.current[dev];
+                next[dev] = { 
+                  ...next[dev], 
+                  progress: updates.progress !== -1 ? updates.progress : next[dev].progress,
+                  log: updates.newLogLines.length > 0 ? `${next[dev].log}\n${updates.newLogLines.join('\n')}` : next[dev].log
+                };
+                changed = true;
+              }
+            }
+            pendingUpdatesRef.current = {};
+            return changed ? next : prev;
+          });
+        }
+      }, 200); // Update UI 5 times a second
+    }
+    return () => {
+      if (updateIntervalRef.current) {
+        clearInterval(updateIntervalRef.current);
+        updateIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const unlisteners: (() => void)[] = [];
@@ -238,22 +273,20 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
         const msg = event.payload;
         const pctMatch = msg.match(/\((\d+)%\)/g);
 
-        setDevices(prev => {
-          const d = prev[dev];
-          if (!d) return prev;
+        if (!pendingUpdatesRef.current[dev]) {
+          pendingUpdatesRef.current[dev] = { progress: -1, newLogLines: [] };
+        }
 
-          let newProgress = d.progress;
-          let clean = msg;
+        let clean = msg;
+        if (pctMatch) {
+          const lastPct = parseInt(pctMatch[pctMatch.length - 1].replace(/\D/g, ""), 10);
+          pendingUpdatesRef.current[dev].progress = lastPct;
+          clean = msg.replace(/\(\d+%\)/g, "").trim();
+        }
 
-          if (pctMatch) {
-            const lastPct = parseInt(pctMatch[pctMatch.length - 1].replace(/\D/g, ""), 10);
-            newProgress = lastPct;
-            clean = msg.replace(/\(\d+%\)/g, "").trim();
-          }
-
-          const newLog = clean ? `${d.log}\n${getTimestamp()} ${clean}` : d.log;
-          return { ...prev, [dev]: { ...d, progress: newProgress, log: newLog } };
-        });
+        if (clean) {
+          pendingUpdatesRef.current[dev].newLogLines.push(`${getTimestamp()} ${clean}`);
+        }
       }).then(fn => unlisteners.push(fn));
     });
 
