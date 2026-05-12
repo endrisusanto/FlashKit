@@ -55,109 +55,6 @@ const startConfettiLoop = (onStop?: () => void) => {
   }, 500);
 };
 
-const BouncingTimer = ({ startTime, active, isFinished, onClose }: { startTime: number, active: boolean, isFinished: boolean, onClose?: () => void }) => {
-  const requestRef = useRef<number>(0);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const timeTextRef = useRef<HTMLSpanElement>(null);
-  
-  const posRef = useRef({ x: 100, y: 100 });
-  const velRef = useRef({ x: 1.5, y: 1.5 }); // Kecepatan diperlambat
-
-  useEffect(() => {
-    if (!active && !isFinished) return;
-
-    if (isFinished && containerRef.current) {
-      // Pindahkan ke tengah layar saat selesai
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      const bw = containerRef.current.offsetWidth || 200;
-      const bh = containerRef.current.offsetHeight || 100;
-      posRef.current = { x: (w - bw) / 2, y: (h - bh) / 2 };
-      containerRef.current.style.transform = `translate(${posRef.current.x}px, ${posRef.current.y}px)`;
-      containerRef.current.style.transition = 'transform 0.5s cubic-bezier(0.25, 1, 0.5, 1)';
-      
-      // Update the final time display
-      if (timeTextRef.current) {
-        const diff = Date.now() - startTime;
-        const mins = Math.floor(diff / 60000).toString().padStart(2, '0');
-        const secs = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
-        timeTextRef.current.textContent = `${mins}:${secs}`;
-      }
-      return;
-    }
-
-    if (containerRef.current) {
-      containerRef.current.style.transition = 'none';
-    }
-
-    const tick = () => {
-      // Update timer text directly without React state re-render
-      if (!isFinished && timeTextRef.current) {
-        const diff = Date.now() - startTime;
-        const mins = Math.floor(diff / 60000).toString().padStart(2, '0');
-        const secs = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
-        timeTextRef.current.textContent = `${mins}:${secs}`;
-      }
-
-      // Update position directly to DOM
-      if (active && !isFinished && containerRef.current) {
-        let nx = posRef.current.x + velRef.current.x;
-        let ny = posRef.current.y + velRef.current.y;
-        
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-        const bw = containerRef.current.offsetWidth || 160;
-        const bh = containerRef.current.offsetHeight || 80;
-
-        if (nx <= 0 || nx >= w - bw) velRef.current.x *= -1;
-        if (ny <= 0 || ny >= h - bh) velRef.current.y *= -1;
-        
-        posRef.current = { x: nx, y: ny };
-        containerRef.current.style.transform = `translate(${nx}px, ${ny}px)`;
-      }
-      
-      requestRef.current = requestAnimationFrame(tick);
-    };
-
-    requestRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(requestRef.current);
-  }, [active, isFinished, startTime]);
-
-  if (!active && !isFinished) return null;
-
-  return (
-    <div 
-      ref={containerRef}
-      onClick={() => { if (isFinished && onClose) onClose(); }}
-      className={`fixed top-0 left-0 z-[10000] select-none transition-all duration-500 rounded-[2rem] ${
-        isFinished 
-          ? "bg-[#111] border-[3px] border-green-500 shadow-[0_0_100px_rgba(34,197,94,0.4)] px-16 py-10 pointer-events-auto cursor-pointer hover:border-green-400 hover:shadow-[0_0_120px_rgba(34,197,94,0.6)] group" 
-          : "bg-blue-500/10 backdrop-blur-xl border border-blue-500/40 px-8 py-4 shadow-[0_0_40px_rgba(59,130,246,0.3)] pointer-events-none"
-      }`}
-      style={{ opacity: (active || isFinished) ? 1 : 0, transform: `translate(${posRef.current.x}px, ${posRef.current.y}px)${isFinished ? ' scale(1.3)' : ' scale(1)'}` }}
-    >
-      {isFinished && (
-        <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-          <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-white/50 hover:text-white hover:bg-red-500/80 transition-colors">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-          </div>
-        </div>
-      )}
-      <div className="flex flex-col items-center">
-        <div className="flex items-center gap-3 mb-2">
-          <div className={`w-2 h-2 rounded-full ${isFinished ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,1)]' : 'bg-blue-500 animate-ping'}`} />
-          <span className={`text-[12px] font-black tracking-[0.3em] uppercase ${isFinished ? 'text-green-400' : 'text-blue-400/80'}`}>
-            {isFinished ? 'Final Timer' : 'Processing'}
-          </span>
-        </div>
-        <span ref={timeTextRef} className={`font-mono font-black text-white tabular-nums tracking-tighter drop-shadow-lg ${isFinished ? 'text-7xl' : 'text-4xl'}`}>00:00</span>
-      </div>
-    </div>
-  );
-};
-
-
-
 export default function App() {
   const [devices, setDevices] = useState<string[]>([]);
   const [deviceDetails, setDeviceDetails] = useState<Record<string, any>>({});
@@ -173,13 +70,6 @@ export default function App() {
 
   // Tab navigation
   const [activeTab, setActiveTab] = useState<"provisioning" | "odin">("provisioning");
-
-  // Timer State
-  const [timerState, setTimerState] = useState({
-    active: false,
-    startTime: 0,
-    isFinished: false
-  });
 
   // Modal State
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -229,7 +119,6 @@ export default function App() {
     if (stopRequested.current) return;
     stopRequested.current = true;
     setIsStopping(true);
-    setTimerState(prev => ({ ...prev, isFinished: true }));
     appendLog("‼ EMERGENCY STOP DIAKTIFKAN! Mematikan semua proses...");
     
     try {
@@ -626,7 +515,6 @@ export default function App() {
       await new Promise(r => setTimeout(r, 50));
 
       stopRequested.current = false;
-      setTimerState({ active: true, startTime: Date.now(), isFinished: false });
       appendLog("==== MEMULAI MASTER SEQUENCE ====");
       if (activeSelection.length > 0) {
         appendLog(`[Auto] Mengunci ${activeSelection.length} perangkat: ${activeSelection.join(", ")}`);
@@ -723,10 +611,7 @@ export default function App() {
       }
 
       appendLog("==== MASTER SEQUENCE SELESAI ====");
-      setTimerState(prev => ({ ...prev, isFinished: true }));
-      startConfettiLoop(() => {
-        setTimerState({ active: false, startTime: 0, isFinished: false });
-      });
+      startConfettiLoop();
       playSuccessSound();
     } catch (e: any) {
       if (e?.message === "STOP" || stopRequested.current) {
@@ -1202,13 +1087,6 @@ export default function App() {
             </button>
           </div>
         </main>
-
-        <BouncingTimer 
-          startTime={timerState.startTime} 
-          active={timerState.active} 
-          isFinished={timerState.isFinished} 
-          onClose={() => setTimerState({ active: false, startTime: 0, isFinished: false })}
-        />
 
         <footer className="h-10 bg-[#0d0d0d] border-t border-[#222] flex items-center px-8 justify-between shrink-0 relative z-50">
           <div className="flex items-center gap-4">
