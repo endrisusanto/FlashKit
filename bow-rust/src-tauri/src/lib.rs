@@ -1,9 +1,10 @@
-use tauri::Manager;
-use std::process::Command;
+use std::io::{BufReader, Read};
 use std::path::PathBuf;
+use std::process::Command;
 use std::process::Stdio;
-use std::io::BufReader;
-use tauri::{Emitter, Window, AppHandle};
+use std::thread;
+use tauri::Manager;
+use tauri::{AppHandle, Emitter, Window};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -14,9 +15,13 @@ use std::os::windows::process::CommandExt;
 
 fn get_odin_binary(app: &AppHandle) -> String {
     let resource_path = if cfg!(target_os = "windows") {
-        app.path().resolve("../bin/windows/odin4.exe", tauri::path::BaseDirectory::Resource)
+        app.path().resolve(
+            "../bin/windows/odin4.exe",
+            tauri::path::BaseDirectory::Resource,
+        )
     } else {
-        app.path().resolve("../bin/linux/odin4", tauri::path::BaseDirectory::Resource)
+        app.path()
+            .resolve("../bin/linux/odin4", tauri::path::BaseDirectory::Resource)
     };
 
     match resource_path {
@@ -32,6 +37,21 @@ fn get_odin_binary(app: &AppHandle) -> String {
     }
 }
 
+fn drain_pipe<R>(mut reader: R) -> thread::JoinHandle<String>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut output = String::new();
+        let _ = reader.read_to_string(&mut output);
+        output
+    })
+}
+
+fn join_pipe_output(handle: Option<thread::JoinHandle<String>>) -> String {
+    handle.and_then(|h| h.join().ok()).unwrap_or_default()
+}
+
 // ─────────────────────────────────────────────
 //  Odin Commands (integrated from odin-clone)
 // ─────────────────────────────────────────────
@@ -45,8 +65,7 @@ fn odin_list_devices(app: AppHandle) -> Result<Vec<String>, String> {
     #[cfg(target_os = "windows")]
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
-    let output = cmd.output()
-        .map_err(|e| format!("{}: {}", binary, e))?;
+    let output = cmd.output().map_err(|e| format!("{}: {}", binary, e))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut devices = Vec::new();
@@ -72,13 +91,18 @@ fn resolve_usb_path(dev: String) -> String {
         if parts.len() >= 3 {
             let bus = parts[parts.len() - 2].parse::<u32>().unwrap_or(0);
             let devnum = parts[parts.len() - 1].parse::<u32>().unwrap_or(0);
-            
+
             if bus > 0 && devnum > 0 {
                 if let Ok(entries) = std::fs::read_dir("/sys/bus/usb/devices/") {
                     for entry in entries.filter_map(Result::ok) {
                         let path = entry.path();
-                        if let (Ok(b), Ok(d)) = (std::fs::read_to_string(path.join("busnum")), std::fs::read_to_string(path.join("devnum"))) {
-                            if b.trim().parse::<u32>().unwrap_or(0) == bus && d.trim().parse::<u32>().unwrap_or(0) == devnum {
+                        if let (Ok(b), Ok(d)) = (
+                            std::fs::read_to_string(path.join("busnum")),
+                            std::fs::read_to_string(path.join("devnum")),
+                        ) {
+                            if b.trim().parse::<u32>().unwrap_or(0) == bus
+                                && d.trim().parse::<u32>().unwrap_or(0) == devnum
+                            {
                                 if let Some(name) = path.file_name() {
                                     return format!("USB:{}", name.to_string_lossy());
                                 }
@@ -122,7 +146,7 @@ fn get_adb_devices_advanced() -> Result<Vec<AdbDeviceExt>, String> {
             let serial = parts[0].to_string();
             let mut usb_port = "".to_string();
             let mut model = "".to_string();
-            
+
             for p in &parts[2..] {
                 if p.starts_with("usb:") {
                     usb_port = p.replace("usb:", "USB:");
@@ -130,8 +154,12 @@ fn get_adb_devices_advanced() -> Result<Vec<AdbDeviceExt>, String> {
                     model = p.replace("model:", "");
                 }
             }
-            
-            devices.push(AdbDeviceExt { serial, usb_port, model });
+
+            devices.push(AdbDeviceExt {
+                serial,
+                usb_port,
+                model,
+            });
         }
     }
     Ok(devices)
@@ -148,7 +176,17 @@ pub struct FlashParams {
 }
 
 #[tauri::command]
-fn odin_flash_device(
+async fn odin_flash_device(
+    app: AppHandle,
+    window: Window,
+    params: FlashParams,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || odin_flash_device_blocking(app, window, params))
+        .await
+        .map_err(|e| format!("Odin flash task failed: {}", e))?
+}
+
+fn odin_flash_device_blocking(
     app: AppHandle,
     window: Window,
     params: FlashParams,
@@ -159,11 +197,21 @@ fn odin_flash_device(
     // Skip internal MD5 check since we already verified it during file selection
     cmd.arg("--ignore-md5");
 
-    if !params.bl.is_empty() { cmd.arg("-b").arg(&params.bl); }
-    if !params.ap.is_empty() { cmd.arg("-a").arg(&params.ap); }
-    if !params.cp.is_empty() { cmd.arg("-c").arg(&params.cp); }
-    if !params.csc.is_empty() { cmd.arg("-s").arg(&params.csc); }
-    if !params.userdata.is_empty() { cmd.arg("-u").arg(&params.userdata); }
+    if !params.bl.is_empty() {
+        cmd.arg("-b").arg(&params.bl);
+    }
+    if !params.ap.is_empty() {
+        cmd.arg("-a").arg(&params.ap);
+    }
+    if !params.cp.is_empty() {
+        cmd.arg("-c").arg(&params.cp);
+    }
+    if !params.csc.is_empty() {
+        cmd.arg("-s").arg(&params.csc);
+    }
+    if !params.userdata.is_empty() {
+        cmd.arg("-u").arg(&params.userdata);
+    }
 
     if !params.device.is_empty() {
         cmd.arg("-d").arg(&params.device);
@@ -177,11 +225,11 @@ fn odin_flash_device(
 
     let mut child = cmd.spawn().map_err(|e| format!("{}: {}", binary, e))?;
     let stdout = child.stdout.take().unwrap();
+    let stderr_reader = child.stderr.take().map(drain_pipe);
     let mut reader = BufReader::new(stdout);
 
     let device_id = params.device.clone();
     let mut buffer = Vec::new();
-    use std::io::Read;
     let mut byte_buf = [0u8; 1];
 
     while reader.read_exact(&mut byte_buf).is_ok() {
@@ -197,17 +245,47 @@ fn odin_flash_device(
         }
     }
 
+    if !buffer.is_empty() {
+        let line = String::from_utf8_lossy(&buffer).to_string();
+        let _ = window.emit(&format!("flash-progress-{}", device_id), line);
+    }
+
     let status = child.wait().map_err(|e| e.to_string())?;
+    let stderr = join_pipe_output(stderr_reader);
 
     if status.success() {
-        Ok(format!("Flashing {} completed successfully.", params.device))
+        Ok(format!(
+            "Flashing {} completed successfully.",
+            params.device
+        ))
+    } else if stderr.trim().is_empty() {
+        Err(format!(
+            "Flashing {} failed with status: {}",
+            params.device, status
+        ))
     } else {
-        Err(format!("Flashing {} failed with status: {}", params.device, status))
+        Err(format!(
+            "Flashing {} failed with status: {}\n{}",
+            params.device,
+            status,
+            stderr.trim()
+        ))
     }
 }
 
 #[tauri::command]
-fn odin_check_file(
+async fn odin_check_file(
+    app: AppHandle,
+    window: Window,
+    path: String,
+    slot: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || odin_check_file_blocking(app, window, path, slot))
+        .await
+        .map_err(|e| format!("Odin check task failed: {}", e))?
+}
+
+fn odin_check_file_blocking(
     app: AppHandle,
     window: Window,
     path: String,
@@ -223,13 +301,13 @@ fn odin_check_file(
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
     let mut child = cmd.spawn().map_err(|e| format!("{}: {}", binary, e))?;
+    let stderr_reader = child.stderr.take().map(drain_pipe);
 
     if let Some(stdout) = child.stdout.take() {
         let mut reader = BufReader::new(stdout);
         let mut buffer = Vec::new();
 
         // Read byte by byte to handle both \n and \r (odin4 uses \r for progress)
-        use std::io::Read;
         let mut byte_buf = [0u8; 1];
         while reader.read_exact(&mut byte_buf).is_ok() {
             let b = byte_buf[0];
@@ -243,14 +321,22 @@ fn odin_check_file(
                 buffer.push(b);
             }
         }
+
+        if !buffer.is_empty() {
+            let line = String::from_utf8_lossy(&buffer).to_string();
+            let _ = window.emit(&format!("md5-progress-{}", slot), line);
+        }
     }
 
     let status = child.wait().map_err(|e| e.to_string())?;
+    let stderr = join_pipe_output(stderr_reader);
 
     if status.success() {
         Ok("Valid".to_string())
-    } else {
+    } else if stderr.trim().is_empty() {
         Err("Invalid file or MD5 mismatch".to_string())
+    } else {
+        Err(format!("Invalid file or MD5 mismatch\n{}", stderr.trim()))
     }
 }
 
@@ -296,9 +382,7 @@ fn get_resource_path(app: tauri::AppHandle, name: String) -> Result<String, Stri
 }
 
 #[tauri::command]
-fn get_device_info(
-    serial: String,
-) -> Result<std::collections::HashMap<String, String>, String> {
+fn get_device_info(serial: String) -> Result<std::collections::HashMap<String, String>, String> {
     let props = vec![
         "ro.product.model",
         "ro.build.PDA",
@@ -559,14 +643,18 @@ fn write_busy_set(set: &std::collections::HashSet<String>) {
 #[tauri::command]
 fn mark_busy(serials: Vec<String>) {
     let mut set = read_busy_set();
-    for s in serials { set.insert(s); }
+    for s in serials {
+        set.insert(s);
+    }
     write_busy_set(&set);
 }
 
 #[tauri::command]
 fn clear_busy(serials: Vec<String>) {
     let mut set = read_busy_set();
-    for s in &serials { set.remove(s); }
+    for s in &serials {
+        set.remove(s);
+    }
     write_busy_set(&set);
 }
 
@@ -585,8 +673,14 @@ fn emergency_stop() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         // Kill odin4.exe and adb.exe on Windows
-        let _ = Command::new("taskkill").args(&["/F", "/IM", "odin4.exe", "/T"]).creation_flags(0x08000000).output();
-        let _ = Command::new("taskkill").args(&["/F", "/IM", "adb.exe", "/T"]).creation_flags(0x08000000).output();
+        let _ = Command::new("taskkill")
+            .args(&["/F", "/IM", "odin4.exe", "/T"])
+            .creation_flags(0x08000000)
+            .output();
+        let _ = Command::new("taskkill")
+            .args(&["/F", "/IM", "adb.exe", "/T"])
+            .creation_flags(0x08000000)
+            .output();
     }
     #[cfg(not(target_os = "windows"))]
     {

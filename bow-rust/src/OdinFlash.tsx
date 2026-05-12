@@ -79,6 +79,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   const devicesRef = useRef(devices);
   const isFlashingRef = useRef(isFlashing);
   const selectedSerialsRef = useRef(selectedSerials);
+  const scanInFlightRef = useRef(false);
   devicesRef.current = devices;
   isFlashingRef.current = isFlashing;
   selectedSerialsRef.current = selectedSerials;
@@ -135,6 +136,8 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
 
   async function scanDevices() {
     if (isFlashingRef.current) return;
+    if (scanInFlightRef.current) return;
+    scanInFlightRef.current = true;
     try {
       const list: string[] = await invoke("odin_list_devices");
       const resolvedPorts: Record<string, string> = {};
@@ -174,6 +177,8 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       });
     } catch (e) {
       console.error("Scan error:", e);
+    } finally {
+      scanInFlightRef.current = false;
     }
   }
 
