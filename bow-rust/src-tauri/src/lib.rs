@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 use tauri::{AppHandle, Emitter, Window};
 
@@ -616,7 +617,7 @@ fn send_at_command(port_name: String, command: String) -> Result<String, String>
 }
 
 // ─────────────────────────────────────────────
-//  Busy Device Tracking (Cross-Instance)
+//  Busy Device Tracking & Cache (Cross-Instance)
 // ─────────────────────────────────────────────
 
 const BUSY_FILE: &str = if cfg!(target_os = "windows") {
@@ -625,47 +626,100 @@ const BUSY_FILE: &str = if cfg!(target_os = "windows") {
     "/tmp/flashkit_busy.json"
 };
 
-fn read_busy_set() -> std::collections::HashSet<String> {
-    if let Ok(data) = std::fs::read_to_string(BUSY_FILE) {
-        if let Ok(v) = serde_json::from_str::<std::collections::HashSet<String>>(&data) {
-            return v;
-        }
-    }
-    std::collections::HashSet::new()
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+struct CachedAdbDevice {
+    serial: String,
+    usb_port: String,
+    model: String,
+    info: std::collections::HashMap<String, String>,
 }
 
-fn write_busy_set(set: &std::collections::HashSet<String>) {
-    if let Ok(json) = serde_json::to_string(set) {
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+struct BusyState {
+    busy_devices: std::collections::HashSet<String>,
+    adb_devices: Vec<CachedAdbDevice>,
+    updated_at_ms: u128,
+}
+
+#[derive(serde::Serialize)]
+struct DeviceCache {
+    devices: Vec<CachedAdbDevice>,
+    updated_at_ms: u128,
+}
+
+fn now_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+fn read_busy_state() -> BusyState {
+    if let Ok(data) = std::fs::read_to_string(BUSY_FILE) {
+        if let Ok(state) = serde_json::from_str::<BusyState>(&data) {
+            return state;
+        }
+        if let Ok(set) = serde_json::from_str::<std::collections::HashSet<String>>(&data) {
+            return BusyState {
+                busy_devices: set,
+                ..Default::default()
+            };
+        }
+    }
+    BusyState::default()
+}
+
+fn write_busy_state(state: &BusyState) {
+    if let Ok(json) = serde_json::to_string(state) {
         let _ = std::fs::write(BUSY_FILE, json);
     }
 }
 
 #[tauri::command]
 fn mark_busy(serials: Vec<String>) {
-    let mut set = read_busy_set();
+    let mut state = read_busy_state();
     for s in serials {
-        set.insert(s);
+        state.busy_devices.insert(s);
     }
-    write_busy_set(&set);
+    write_busy_state(&state);
 }
 
 #[tauri::command]
 fn clear_busy(serials: Vec<String>) {
-    let mut set = read_busy_set();
+    let mut state = read_busy_state();
     for s in &serials {
-        set.remove(s);
+        state.busy_devices.remove(s);
     }
-    write_busy_set(&set);
+    write_busy_state(&state);
 }
 
 #[tauri::command]
 fn get_busy_devices() -> Vec<String> {
-    read_busy_set().into_iter().collect()
+    read_busy_state().busy_devices.into_iter().collect()
 }
 
 #[tauri::command]
 fn reset_busy_devices() {
-    write_busy_set(&std::collections::HashSet::new());
+    let mut state = read_busy_state();
+    state.busy_devices.clear();
+    write_busy_state(&state);
+}
+
+#[tauri::command]
+fn save_device_cache(devices: Vec<CachedAdbDevice>) {
+    let mut state = read_busy_state();
+    state.adb_devices = devices;
+    state.updated_at_ms = now_ms();
+    write_busy_state(&state);
+}
+
+#[tauri::command]
+fn get_device_cache() -> DeviceCache {
+    let state = read_busy_state();
+    DeviceCache {
+        devices: state.adb_devices,
+        updated_at_ms: state.updated_at_ms,
+    }
 }
 
 #[tauri::command]
@@ -729,6 +783,8 @@ pub fn run() {
             clear_busy,
             get_busy_devices,
             reset_busy_devices,
+            save_device_cache,
+            get_device_cache,
             emergency_stop
         ])
         .run(tauri::generate_context!())

@@ -5,6 +5,18 @@ import OdinFlash, { OdinFlashRef, DeviceData } from "./OdinFlash";
 import logo from './assets/logo.png';
 import confetti from 'canvas-confetti';
 
+type CachedDevice = {
+  serial: string;
+  usb_port: string;
+  model: string;
+  info: Record<string, string>;
+};
+
+type DeviceCache = {
+  devices: CachedDevice[];
+  updated_at_ms: number;
+};
+
 const playSuccessSound = () => {
   try {
     const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
@@ -90,6 +102,7 @@ export default function App() {
   const [currentStep, setCurrentStep] = useState<number | null>(null);
   const [isStopping, setIsStopping] = useState(false);
   const stopRequested = useRef(false);
+  const lastDeviceCacheAt = useRef(0);
 
   const appendLog = (msg: string) => {
     const time = new Date().toLocaleTimeString();
@@ -144,17 +157,46 @@ export default function App() {
     }
   }, [loading]);
 
+  const applyDeviceCache = (cache: DeviceCache) => {
+    if (cache.updated_at_ms <= lastDeviceCacheAt.current) return;
+
+    const cachedDevices = cache.devices.map(device => device.serial);
+    const cachedDetails = cache.devices.reduce<Record<string, any>>((acc, device) => {
+      acc[device.serial] = {
+        ...device.info,
+        usb_port: device.usb_port,
+        _model: device.model,
+      };
+      if (device.usb_port) {
+        localStorage.setItem('port_history_' + device.usb_port, JSON.stringify({
+          serial: device.serial,
+          model: device.info['ro.product.model'] || device.model,
+        }));
+      }
+      return acc;
+    }, {});
+
+    lastDeviceCacheAt.current = cache.updated_at_ms;
+    setDevices(cachedDevices);
+    setDeviceDetails(cachedDetails);
+    setSelectedDevices(prev => prev.length === 0 ? cachedDevices : prev.filter(id => cachedDevices.includes(id)));
+  };
+
   useEffect(() => {
     const poll = async () => {
       try {
-        const busy: string[] = await invoke("get_busy_devices");
+        const [busy, cache] = await Promise.all([
+          invoke<string[]>("get_busy_devices"),
+          invoke<DeviceCache>("get_device_cache"),
+        ]);
         setBusyDevices(busy);
+        if (!loading) applyDeviceCache(cache);
       } catch { }
     };
     poll();
     const interval = setInterval(poll, 4000);
     return () => clearInterval(interval);
-  }, []);
+  }, [loading]);
 
   const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -214,6 +256,20 @@ export default function App() {
 
       setDeviceDetails(details);
       if (selectedDevices.length === 0) setSelectedDevices(list);
+      await invoke("save_device_cache", {
+        devices: advList.map((adv: any) => {
+          const detail = details[adv.serial] || {};
+          const { usb_port, _model, ...info } = detail;
+          return {
+            serial: adv.serial,
+            usb_port: adv.usb_port,
+            model: info['ro.product.model'] || adv.model || "",
+            info,
+          };
+        }),
+      });
+      const cache: DeviceCache = await invoke("get_device_cache");
+      lastDeviceCacheAt.current = cache.updated_at_ms;
       if (!silent) appendLog(`Ditemukan ${list.length} perangkat`);
 
       if (samsungPortsCount > 0 && list.length === 0 && !silent) {
@@ -838,7 +894,7 @@ export default function App() {
             >
               {currentVerifyProgress > 0 && currentVerifyProgress < 100 && (
                 <div 
-                  className="absolute bottom-0 left-0 h-full bg-blue-500/10 transition-all duration-300 pointer-events-none"
+                  className="absolute bottom-0 left-0 h-full bg-blue-400/30 shadow-[0_0_24px_rgba(96,165,250,0.35)] transition-all duration-300 pointer-events-none"
                   style={{ width: `${currentVerifyProgress}%` }}
                 />
               )}
@@ -875,7 +931,7 @@ export default function App() {
                     <ShieldAlert className="w-4 h-4 text-red-500/60 group-hover:text-red-500 transition-colors" />
                   </button>
                   <button onClick={selectAll} className="flex-1 py-2.5 bg-white/5 border border-white/10 text-[10px] font-black uppercase hover:bg-white/10 hover:border-white/20 transition-all tracking-widest rounded-xl shadow-sm">
-                    {selectedDevices.length === devices.length ? "Uncheck All" : "Select All"}
+                    {selectedDevices.length === devices.filter(id => !busyDevices.includes(id)).length ? "Uncheck All" : "Select All"}
                   </button>
                 </div>
               </div>
@@ -898,7 +954,7 @@ export default function App() {
                         if (odinData && odinData.status === "Flashing...") {
                           return (
                             <div 
-                              className="absolute inset-0 bg-blue-500/20 transition-all duration-300 z-0" 
+                              className="absolute inset-0 bg-blue-400/45 shadow-[0_0_35px_rgba(96,165,250,0.35)] transition-all duration-300 z-0" 
                               style={{ width: `${odinData.progress}%` }} 
                             />
                           );
@@ -1071,9 +1127,11 @@ export default function App() {
                 setShowDownloadModal(true);
                 setLoading(true);
                 try {
-                  const list: string[] = await invoke("get_devices");
-                  setDevices(list);
-                  setDownloadSelectedDevices(list);
+                  const cache: DeviceCache = await invoke("get_device_cache");
+                  applyDeviceCache(cache);
+                  const list = cache.devices.length > 0 ? cache.devices.map(device => device.serial) : await invoke<string[]>("get_devices");
+                  if (cache.devices.length === 0) setDevices(list);
+                  setDownloadSelectedDevices(list.filter(id => !busyDevices.includes(id)));
                 } catch (e) {
                   console.error(e);
                 } finally {
