@@ -76,7 +76,7 @@ jobs:
         with:
           draft: ${{ github.event_name == 'push' && true || inputs.draft }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
-          name: 'FlashKit ${{ github.event_name == 'push' && github.ref_name || needs.bump-version.outputs.tag_name }}'
+          name: "FlashKit ${{ github.event_name == 'push' && github.ref_name || needs.bump-version.outputs.tag_name }}"
           tag_name: ${{ github.event_name == 'push' && github.ref_name || needs.bump-version.outputs.tag_name }}
           generate_release_notes: true
 
@@ -125,7 +125,7 @@ jobs:
         with:
           projectPath: ./bow-rust
           tagName: ${{ github.event_name == 'push' && github.ref_name || needs.bump-version.outputs.tag_name }}
-          releaseName: 'FlashKit ${{ github.event_name == 'push' && github.ref_name || needs.bump-version.outputs.tag_name }}'
+          releaseName: "FlashKit ${{ github.event_name == 'push' && github.ref_name || needs.bump-version.outputs.tag_name }}"
           releaseDraft: ${{ github.event_name == 'push' && true || inputs.draft }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
           args: ${{ matrix.platform == 'windows-latest' && '--bundles nsis' || '--bundles deb,rpm,appimage' }}
