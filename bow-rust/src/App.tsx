@@ -608,9 +608,9 @@ export default function App() {
               await delay(10000); 
               await refreshDevices(true);
 
-              // Refresh list device di layar (Retry logic: 10x)
+              // Refresh list device di layar (Retry logic: 30x)
               let foundNew = false;
-              for (let i = 0; i < 10; i++) {
+              for (let i = 0; i < 30; i++) {
                 if (stopRequested.current) break;
                 await refreshDevices(true);
                 try {
@@ -628,14 +628,14 @@ export default function App() {
                   }
                 } catch (e) { }
                 
-                if (i < 9) {
-                  appendLog(`⏳ Perangkat belum terdeteksi sempurna (Percobaan ${i+1}/10). Mencoba lagi dalam 10 detik...`);
+                if (i < 29) {
+                  appendLog(`⏳ Perangkat belum terdeteksi sempurna (Percobaan ${i+1}/30). Mencoba lagi dalam 10 detik...`);
                   await delay(10000);
                 }
               }
 
               if (!foundNew) {
-                appendLog("✗ KRITIKAL: Perangkat tidak ditemukan setelah 10x percobaan!");
+                appendLog("✗ KRITIKAL: Perangkat tidak ditemukan setelah 30x percobaan!");
                 alert("Kritikal: Perangkat tidak terdeteksi setelah reboot!\nProses dihentikan secara paksa demi keamanan.");
                 await handleEmergencyStop();
                 return;
