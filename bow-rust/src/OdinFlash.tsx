@@ -464,7 +464,6 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
 
   // ── UI (Original Odin-Clone Style) ────────────────────────────────────
 
-  const checkedCount = Object.values(devices).filter(d => d.checked).length;
   const readyToFlashCount = Object.values(devices).filter(d => d.checked && d.status !== "Flashing...").length;
   const anyFlashing = Object.values(devices).some(d => d.status === "Flashing...");
 
