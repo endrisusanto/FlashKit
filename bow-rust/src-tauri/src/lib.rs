@@ -10,6 +10,16 @@ use tauri::{AppHandle, Emitter, Window};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
+async fn run_blocking<T, F>(task_name: &'static str, task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|e| format!("{} task failed: {}", task_name, e))?
+}
+
 // ─────────────────────────────────────────────
 //  Odin Binary Path Resolver
 // ─────────────────────────────────────────────
@@ -58,7 +68,11 @@ fn join_pipe_output(handle: Option<thread::JoinHandle<String>>) -> String {
 // ─────────────────────────────────────────────
 
 #[tauri::command]
-fn odin_list_devices(app: AppHandle) -> Result<Vec<String>, String> {
+async fn odin_list_devices(app: AppHandle) -> Result<Vec<String>, String> {
+    run_blocking("Odin list devices", move || odin_list_devices_blocking(app)).await
+}
+
+fn odin_list_devices_blocking(app: AppHandle) -> Result<Vec<String>, String> {
     let binary = get_odin_binary(&app);
     let mut cmd = Command::new(&binary);
     cmd.arg("-l");
@@ -85,7 +99,30 @@ fn odin_list_devices(app: AppHandle) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-fn resolve_usb_path(dev: String) -> String {
+async fn resolve_usb_path(dev: String) -> Result<String, String> {
+    run_blocking("Resolve USB path", move || {
+        Ok(resolve_usb_path_blocking(dev))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn resolve_usb_paths(
+    devices: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    run_blocking("Resolve USB paths", move || {
+        Ok(devices
+            .into_iter()
+            .map(|dev| {
+                let port = resolve_usb_path_blocking(dev.clone());
+                (dev, port)
+            })
+            .collect())
+    })
+    .await
+}
+
+fn resolve_usb_path_blocking(dev: String) -> String {
     #[cfg(target_os = "linux")]
     {
         let parts: Vec<&str> = dev.split('/').collect();
@@ -130,7 +167,11 @@ pub struct AdbDeviceExt {
 }
 
 #[tauri::command]
-fn get_adb_devices_advanced() -> Result<Vec<AdbDeviceExt>, String> {
+async fn get_adb_devices_advanced() -> Result<Vec<AdbDeviceExt>, String> {
+    run_blocking("ADB device scan", get_adb_devices_advanced_blocking).await
+}
+
+fn get_adb_devices_advanced_blocking() -> Result<Vec<AdbDeviceExt>, String> {
     let adb_path = find_adb();
     let output = Command::new(&adb_path)
         .arg("devices")
@@ -383,8 +424,16 @@ fn get_resource_path(app: tauri::AppHandle, name: String) -> Result<String, Stri
 }
 
 #[tauri::command]
-fn get_device_info(serial: String) -> Result<std::collections::HashMap<String, String>, String> {
-    let props = vec![
+async fn get_device_info(
+    serial: String,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    run_blocking("ADB device info", move || get_device_info_blocking(serial)).await
+}
+
+fn get_device_info_blocking(
+    serial: String,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let props = [
         "ro.product.model",
         "ro.build.PDA",
         "ro.csc.sales_code",
@@ -392,17 +441,21 @@ fn get_device_info(serial: String) -> Result<std::collections::HashMap<String, S
         "ro.build.fingerprint",
     ];
 
+    let prop_list = props.join(" ");
+    let script = format!("for p in {}; do echo \"$p=$(getprop $p)\"; done", prop_list);
+    let output = run_adb_blocking(vec!["-s".to_string(), serial, "shell".to_string(), script])?;
+
     let mut info = std::collections::HashMap::new();
-    for prop in props {
-        let val = run_adb(vec![
-            "-s".to_string(),
-            serial.clone(),
-            "shell".to_string(),
-            "getprop".to_string(),
-            prop.to_string(),
-        ])?;
-        info.insert(prop.to_string(), val);
+    for line in output.lines() {
+        if let Some((key, value)) = line.split_once('=') {
+            info.insert(key.trim().to_string(), value.trim().to_string());
+        }
     }
+
+    for prop in props {
+        info.entry(prop.to_string()).or_default();
+    }
+
     Ok(info)
 }
 
@@ -478,7 +531,11 @@ fn find_adb() -> String {
 }
 
 #[tauri::command]
-fn get_adb_version() -> String {
+async fn get_adb_version() -> Result<String, String> {
+    run_blocking("ADB version", || Ok(get_adb_version_blocking())).await
+}
+
+fn get_adb_version_blocking() -> String {
     let adb_path = find_adb();
     let mut cmd = Command::new(&adb_path);
     cmd.arg("version");
@@ -498,12 +555,19 @@ fn get_adb_version() -> String {
 }
 
 #[tauri::command]
-fn get_app_dir() -> String {
-    get_exe_dir().to_string_lossy().to_string()
+async fn get_app_dir() -> Result<String, String> {
+    run_blocking("App dir", || {
+        Ok(get_exe_dir().to_string_lossy().to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-fn get_devices() -> Result<Vec<String>, String> {
+async fn get_devices() -> Result<Vec<String>, String> {
+    run_blocking("ADB devices", get_devices_blocking).await
+}
+
+fn get_devices_blocking() -> Result<Vec<String>, String> {
     let adb_path = find_adb();
     let mut cmd = Command::new(&adb_path);
     cmd.arg("devices");
@@ -527,12 +591,13 @@ fn get_devices() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-fn run_adb(args: Vec<String>) -> Result<String, String> {
+async fn run_adb(args: Vec<String>) -> Result<String, String> {
+    run_blocking("ADB command", move || run_adb_blocking(args)).await
+}
+
+fn run_adb_blocking(args: Vec<String>) -> Result<String, String> {
     let adb_path = find_adb();
     let mut last_err = String::new();
-
-    // Stabilization delay to prevent "error: closed"
-    std::thread::sleep(std::time::Duration::from_millis(300));
 
     for attempt in 1..=3 {
         let mut cmd = Command::new(&adb_path);
@@ -557,7 +622,7 @@ fn run_adb(args: Vec<String>) -> Result<String, String> {
 
         // If it's a connection error, wait and retry
         if last_err.contains("closed") || last_err.contains("device not found") {
-            std::thread::sleep(std::time::Duration::from_millis(1000 * attempt));
+            std::thread::sleep(std::time::Duration::from_millis(250 * attempt));
             continue;
         } else {
             break; // Other errors don't need retry
@@ -568,7 +633,11 @@ fn run_adb(args: Vec<String>) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn get_samsung_ports() -> Result<Vec<String>, String> {
+async fn get_samsung_ports() -> Result<Vec<String>, String> {
+    run_blocking("Samsung port scan", get_samsung_ports_blocking).await
+}
+
+fn get_samsung_ports_blocking() -> Result<Vec<String>, String> {
     let ports = serialport::available_ports().map_err(|e| e.to_string())?;
     let mut samsung_ports = vec![];
     for p in ports {
@@ -583,7 +652,11 @@ fn get_samsung_ports() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-fn get_serial_ports() -> Vec<String> {
+async fn get_serial_ports() -> Result<Vec<String>, String> {
+    run_blocking("Serial port scan", || Ok(get_serial_ports_blocking())).await
+}
+
+fn get_serial_ports_blocking() -> Vec<String> {
     match serialport::available_ports() {
         Ok(ports) => ports.into_iter().map(|p| p.port_name).collect(),
         Err(_) => vec![],
@@ -591,7 +664,14 @@ fn get_serial_ports() -> Vec<String> {
 }
 
 #[tauri::command]
-fn send_at_command(port_name: String, command: String) -> Result<String, String> {
+async fn send_at_command(port_name: String, command: String) -> Result<String, String> {
+    run_blocking("AT command", move || {
+        send_at_command_blocking(port_name, command)
+    })
+    .await
+}
+
+fn send_at_command_blocking(port_name: String, command: String) -> Result<String, String> {
     use std::io::{Read, Write};
     use std::time::Duration;
 
@@ -723,7 +803,11 @@ fn get_device_cache() -> DeviceCache {
 }
 
 #[tauri::command]
-fn emergency_stop() -> Result<(), String> {
+async fn emergency_stop() -> Result<(), String> {
+    run_blocking("Emergency stop", emergency_stop_blocking).await
+}
+
+fn emergency_stop_blocking() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         // Kill odin4.exe and adb.exe on Windows
@@ -770,6 +854,7 @@ pub fn run() {
             get_serial_ports,
             get_samsung_ports,
             resolve_usb_path,
+            resolve_usb_paths,
             get_adb_devices_advanced,
             send_at_command,
             get_resource_path,

@@ -836,23 +836,32 @@ export default function App() {
                     Tidak ada perangkat ADB yang terdeteksi.
                   </div>
                 ) : (
-                  devices.map(dev => (
-                    <div
-                      key={dev}
-                      onClick={() => setDownloadSelectedDevices(p => p.includes(dev) ? p.filter(d => d !== dev) : [...p, dev])}
-                      className={`p-5 rounded-2xl border transition-all cursor-pointer flex items-center gap-5 select-none
-                      ${downloadSelectedDevices.includes(dev) ? 'bg-blue-500/10 border-blue-500/50' : 'bg-black border-white/10 hover:border-white/30'}`}
-                    >
-                      <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 border transition-all
-                      ${downloadSelectedDevices.includes(dev) ? 'bg-blue-500 border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'bg-transparent border-white/20'}`}>
-                        {downloadSelectedDevices.includes(dev) && <Check className="w-4 h-4 text-white" />}
+                  devices.map(dev => {
+                    const detail = deviceDetails[dev] || {};
+                    const model = detail['ro.product.model'] || detail._model || 'Unknown Model';
+                    const port = detail.usb_port || 'Unknown Port';
+
+                    return (
+                      <div
+                        key={dev}
+                        onClick={() => setDownloadSelectedDevices(p => p.includes(dev) ? p.filter(d => d !== dev) : [...p, dev])}
+                        className={`p-5 rounded-2xl border transition-all cursor-pointer flex items-center gap-5 select-none
+                        ${downloadSelectedDevices.includes(dev) ? 'bg-blue-500/10 border-blue-500/50' : 'bg-black border-white/10 hover:border-white/30'}`}
+                      >
+                        <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 border transition-all
+                        ${downloadSelectedDevices.includes(dev) ? 'bg-blue-500 border-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'bg-transparent border-white/20'}`}>
+                          {downloadSelectedDevices.includes(dev) && <Check className="w-4 h-4 text-white" />}
+                        </div>
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <Smartphone className="w-5 h-5 text-white/30 shrink-0" />
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-bold text-[15px] tracking-wide truncate">{model}</span>
+                            <span className="font-mono text-[11px] text-white/35 truncate">SN: {dev} &bull; {port}</span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <Smartphone className="w-5 h-5 text-white/30 shrink-0" />
-                        <span className="font-mono font-bold text-[15px] tracking-wide truncate">{dev}</span>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
 

@@ -140,10 +140,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     scanInFlightRef.current = true;
     try {
       const list: string[] = await invoke("odin_list_devices");
-      const resolvedPorts: Record<string, string> = {};
-      for (const dev of list) {
-        resolvedPorts[dev] = await invoke("resolve_usb_path", { dev });
-      }
+      const resolvedPorts: Record<string, string> = await invoke("resolve_usb_paths", { devices: list });
       
       setDevices(prev => {
         const updated = { ...prev };
