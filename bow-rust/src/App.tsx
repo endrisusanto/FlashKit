@@ -238,21 +238,17 @@ export default function App() {
       const details: Record<string, any> = {};
       let hasFail = false;
 
-      await Promise.all(advList.map(async (adv) => {
-        try {
-          const info: any = await invoke("get_device_info", { serial: adv.serial });
-          if (!info || Object.keys(info).length === 0) throw new Error("Data Kosong");
-          details[adv.serial] = { ...info, usb_port: adv.usb_port, _model: adv.model };
-          // Save to history for Odin tab
-          localStorage.setItem('port_history_' + adv.usb_port, JSON.stringify({ serial: adv.serial, model: info['ro.product.model'] || adv.model }));
-        } catch (e) {
-          console.error(`Gagal ambil data ${adv.serial}:`, e);
+      for (const adv of advList) {
+        const info = adv.info || {};
+        const hasProps = Object.keys(info).length > 0;
+        if (!hasProps) {
           hasFail = true;
           setFailedDevice(adv.serial);
-          details[adv.serial] = { usb_port: adv.usb_port, _model: adv.model };
-          localStorage.setItem('port_history_' + adv.usb_port, JSON.stringify({ serial: adv.serial, model: adv.model }));
         }
-      }));
+        details[adv.serial] = { ...info, usb_port: adv.usb_port, _model: adv.model };
+        // Save to history for Odin tab
+        localStorage.setItem('port_history_' + adv.usb_port, JSON.stringify({ serial: adv.serial, model: info['ro.product.model'] || adv.model }));
+      }
 
       setDeviceDetails(details);
       if (selectedDevices.length === 0) setSelectedDevices(list);

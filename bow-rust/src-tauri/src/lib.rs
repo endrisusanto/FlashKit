@@ -164,6 +164,36 @@ pub struct AdbDeviceExt {
     pub serial: String,
     pub usb_port: String,
     pub model: String,
+    pub info: std::collections::HashMap<String, String>,
+}
+
+fn parse_getprop_line(line: &str) -> Option<(String, String)> {
+    let trimmed = line.trim();
+    let split = trimmed.find("]: [")?;
+    let key = trimmed.get(1..split)?;
+    let value_start = split + 4;
+    let value_end = trimmed.len().checked_sub(1)?;
+    let value = trimmed.get(value_start..value_end)?;
+    Some((key.to_string(), value.to_string()))
+}
+
+fn adb_props_blocking(adb: &str, serial: &str) -> Result<std::collections::HashMap<String, String>, String> {
+    let mut cmd = Command::new(adb);
+    cmd.args(["-s", serial, "shell", "getprop"]);
+
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    let output = cmd.output().map_err(|e| e.to_string())?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let mut props = std::collections::HashMap::new();
+    for line in stdout.lines() {
+        if let Some((key, value)) = parse_getprop_line(line) {
+            props.insert(key, value);
+        }
+    }
+    Ok(props)
 }
 
 #[tauri::command]
@@ -180,30 +210,55 @@ fn get_adb_devices_advanced_blocking() -> Result<Vec<AdbDeviceExt>, String> {
         .map_err(|e| e.to_string())?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut devices = Vec::new();
+    let mut threads = Vec::new();
 
     for line in stdout.lines().skip(1) {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() >= 2 && parts[1] == "device" {
             let serial = parts[0].to_string();
             let mut usb_port = "".to_string();
-            let mut model = "".to_string();
+            let mut model_token = "".to_string();
 
             for p in &parts[2..] {
                 if p.starts_with("usb:") {
                     usb_port = p.replace("usb:", "USB:");
                 } else if p.starts_with("model:") {
-                    model = p.replace("model:", "");
+                    model_token = p.replace("model:", "");
                 }
             }
+
+            let adb_path_clone = adb_path.clone();
+            let serial_clone = serial.clone();
+            let handle = std::thread::spawn(move || {
+                let props = adb_props_blocking(&adb_path_clone, &serial_clone).unwrap_or_default();
+                (props, usb_port, model_token)
+            });
+            threads.push((serial, handle));
+        }
+    }
+
+    let mut devices = Vec::new();
+    for (serial, handle) in threads {
+        if let Ok((props, usb_port, model_token)) = handle.join() {
+            let model = if let Some(m) = props.get("ro.product.model") {
+                if !m.trim().is_empty() {
+                    m.clone()
+                } else {
+                    model_token.clone()
+                }
+            } else {
+                model_token.clone()
+            };
 
             devices.push(AdbDeviceExt {
                 serial,
                 usb_port,
                 model,
+                info: props,
             });
         }
     }
+
     Ok(devices)
 }
 
