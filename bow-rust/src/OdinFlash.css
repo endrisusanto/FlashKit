@@ -5,8 +5,8 @@
   --primary: #2563eb;
   --primary-hover: #1d4ed8;
   --progress-blue: #3b82f6;
-  --progress-green: rgba(34, 197, 94, 0.34);
-  --outline-green: #34d399;
+  --progress-blue-bg: rgba(59, 130, 246, 0.34);
+  --outline-blue: #60a5fa;
   --text-main: #f1f1f1;
   --text-muted: #8e8e93;
   --font-mono: 'JetBrains Mono', monospace;
@@ -69,7 +69,7 @@
   font-family: var(--font-mono);
   font-size: clamp(11px, 1.5vh, 14px);
   background: #000;
-  color: var(--outline-green);
+  color: var(--outline-blue);
   padding: 12px;
   border-radius: 8px;
   overflow-y: auto;
@@ -106,7 +106,7 @@
   margin-bottom: clamp(8px, 1.5vh, 16px);
   width: 100%;
   scrollbar-width: thin;
-  scrollbar-color: var(--outline-green) transparent;
+  scrollbar-color: var(--outline-blue) transparent;
 }
 
 .devices-section::-webkit-scrollbar {
@@ -119,7 +119,7 @@
 }
 
 .devices-section::-webkit-scrollbar-thumb {
-  background: var(--outline-green);
+  background: var(--outline-blue);
   border-radius: 10px;
 }
 
@@ -171,7 +171,7 @@
 }
 
 .device-card.flashing-state {
-  border-color: var(--outline-green);
+  border-color: var(--outline-blue);
 }
 
 .device-card.flashing-state input[type="checkbox"] {
@@ -200,8 +200,8 @@
   left: 0;
   bottom: 0;
   width: 0%;
-  background: var(--progress-green);
-  box-shadow: inset 0 0 22px rgba(34, 197, 94, 0.22);
+  background: var(--progress-blue-bg);
+  box-shadow: inset 0 0 22px rgba(59, 130, 246, 0.22);
   z-index: 0;
   transition: width 0.1s linear;
 }
@@ -346,7 +346,7 @@
 }
 
 .dev-status-flashing {
-  color: var(--outline-green);
+  color: var(--outline-blue);
   font-size: clamp(10px, 1.4vh, 13px);
   margin-left: 6px;
   animation: pulse-skeleton 1.5s infinite;
