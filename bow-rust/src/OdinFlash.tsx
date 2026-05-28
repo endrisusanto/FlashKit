@@ -487,12 +487,9 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     <div className="odin-container">
       <div className="devices-section">
         {Object.entries(devices).length === 0 ? (
-          <>
-            <div className="device-skeleton"></div>
-            <div className="device-skeleton"></div>
-            <div className="device-skeleton"></div>
-            <div className="device-skeleton"></div>
-          </>
+          <div className="device-skeleton">
+            No devices currently in Odin state
+          </div>
         ) : (
           Object.entries(devices).map(([dev, data]) => (
             <div

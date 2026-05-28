@@ -29,6 +29,15 @@ if [[ "$OS_TYPE" == "Linux" ]]; then
     fi
   fi
 
+  # Fallback to command detection if OS family still unknown
+  if [[ -z "$LINUX_FAMILY" ]]; then
+    if command -v dnf >/dev/null 2>&1 || command -v rpm >/dev/null 2>&1; then
+      LINUX_FAMILY="rpm"
+    elif command -v apt >/dev/null 2>&1 || command -v dpkg >/dev/null 2>&1; then
+      LINUX_FAMILY="deb"
+    fi
+  fi
+
   if [[ "$LINUX_FAMILY" == "rpm" ]]; then
     echo "Detected Fedora/RHEL Linux - Building RPM"
     BUNDLES="rpm"
@@ -66,8 +75,15 @@ install_linux_package() {
   rpm_file="$(latest_file "$BUNDLE_DIR/rpm" "*.rpm")"
 
   if [[ "$LINUX_FAMILY" == "deb" && -n "$deb_file" ]] && command -v apt >/dev/null 2>&1; then
-    echo "Installing DEB package: $deb_file"
-    sudo apt install -y "$deb_file"
+    local pkg_name
+    pkg_name="$(dpkg-deb -f "$deb_file" Package 2>/dev/null || echo "")"
+    if [[ -n "$pkg_name" ]] && dpkg -l "$pkg_name" >/dev/null 2>&1; then
+      echo "Installing DEB package (Reinstalling): $deb_file"
+      sudo apt install --reinstall -y "$deb_file"
+    else
+      echo "Installing DEB package: $deb_file"
+      sudo apt install -y "$deb_file"
+    fi
     return
   fi
 
@@ -78,14 +94,28 @@ install_linux_package() {
   fi
 
   if [[ "$LINUX_FAMILY" == "rpm" && -n "$rpm_file" ]] && command -v dnf >/dev/null 2>&1; then
-    echo "Installing RPM package: $rpm_file"
-    sudo dnf install -y "$rpm_file"
+    local pkg_name
+    pkg_name="$(rpm -qp --queryformat '%{NAME}' "$rpm_file" 2>/dev/null || echo "")"
+    if [[ -n "$pkg_name" ]] && rpm -q "$pkg_name" >/dev/null 2>&1; then
+      echo "Installing RPM package (Reinstalling): $rpm_file"
+      sudo dnf reinstall -y "$rpm_file"
+    else
+      echo "Installing RPM package: $rpm_file"
+      sudo dnf install -y "$rpm_file"
+    fi
     return
   fi
 
   if [[ "$LINUX_FAMILY" == "rpm" && -n "$rpm_file" ]] && command -v yum >/dev/null 2>&1; then
-    echo "Installing RPM package: $rpm_file"
-    sudo yum install -y "$rpm_file"
+    local pkg_name
+    pkg_name="$(rpm -qp --queryformat '%{NAME}' "$rpm_file" 2>/dev/null || echo "")"
+    if [[ -n "$pkg_name" ]] && rpm -q "$pkg_name" >/dev/null 2>&1; then
+      echo "Installing RPM package (Reinstalling): $rpm_file"
+      sudo yum reinstall -y "$rpm_file"
+    else
+      echo "Installing RPM package: $rpm_file"
+      sudo yum install -y "$rpm_file"
+    fi
     return
   fi
 
@@ -103,14 +133,28 @@ install_linux_package() {
 
   if [[ -z "$LINUX_FAMILY" ]]; then
     if [[ -n "$deb_file" ]] && command -v apt >/dev/null 2>&1; then
-      echo "Installing DEB package: $deb_file"
-      sudo apt install -y "$deb_file"
+      local pkg_name
+      pkg_name="$(dpkg-deb -f "$deb_file" Package 2>/dev/null || echo "")"
+      if [[ -n "$pkg_name" ]] && dpkg -l "$pkg_name" >/dev/null 2>&1; then
+        echo "Installing DEB package (Reinstalling): $deb_file"
+        sudo apt install --reinstall -y "$deb_file"
+      else
+        echo "Installing DEB package: $deb_file"
+        sudo apt install -y "$deb_file"
+      fi
       return
     fi
 
     if [[ -n "$rpm_file" ]] && command -v dnf >/dev/null 2>&1; then
-      echo "Installing RPM package: $rpm_file"
-      sudo dnf install -y "$rpm_file"
+      local pkg_name
+      pkg_name="$(rpm -qp --queryformat '%{NAME}' "$rpm_file" 2>/dev/null || echo "")"
+      if [[ -n "$pkg_name" ]] && rpm -q "$pkg_name" >/dev/null 2>&1; then
+        echo "Installing RPM package (Reinstalling): $rpm_file"
+        sudo dnf reinstall -y "$rpm_file"
+      else
+        echo "Installing RPM package: $rpm_file"
+        sudo dnf install -y "$rpm_file"
+      fi
       return
     fi
   fi
