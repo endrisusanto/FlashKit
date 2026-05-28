@@ -167,6 +167,13 @@ pub struct AdbDeviceExt {
     pub info: std::collections::HashMap<String, String>,
 }
 
+#[derive(serde::Serialize)]
+pub struct SamsungPortInfo {
+    pub port_name: String,
+    pub usb_port: String,
+    pub serial_number: Option<String>,
+}
+
 fn parse_getprop_line(line: &str) -> Option<(String, String)> {
     let trimmed = line.trim();
     let split = trimmed.find("]: [")?;
@@ -706,6 +713,53 @@ fn get_samsung_ports_blocking() -> Result<Vec<String>, String> {
     Ok(samsung_ports)
 }
 
+fn tty_usb_path(port_name: &str) -> String {
+    #[cfg(target_os = "linux")]
+    {
+        let tty_name = port_name.rsplit('/').next().unwrap_or(port_name);
+        let sys_path = PathBuf::from("/sys/class/tty").join(tty_name).join("device");
+        if let Ok(real_path) = std::fs::canonicalize(sys_path) {
+            for component in real_path.components().rev() {
+                let name = component.as_os_str().to_string_lossy();
+                let base = name.split(':').next().unwrap_or(&name);
+                if base
+                    .chars()
+                    .next()
+                    .map(|c| c.is_ascii_digit())
+                    .unwrap_or(false)
+                    && base.contains('-')
+                {
+                    return format!("USB:{}", base);
+                }
+            }
+        }
+    }
+
+    String::new()
+}
+
+#[tauri::command]
+async fn get_samsung_ports_detailed() -> Result<Vec<SamsungPortInfo>, String> {
+    run_blocking("Samsung detailed port scan", get_samsung_ports_detailed_blocking).await
+}
+
+fn get_samsung_ports_detailed_blocking() -> Result<Vec<SamsungPortInfo>, String> {
+    let ports = serialport::available_ports().map_err(|e| e.to_string())?;
+    let mut samsung_ports = vec![];
+    for p in ports {
+        if let serialport::SerialPortType::UsbPort(info) = p.port_type {
+            if info.vid == 0x04e8 {
+                samsung_ports.push(SamsungPortInfo {
+                    usb_port: tty_usb_path(&p.port_name),
+                    port_name: p.port_name,
+                    serial_number: info.serial_number,
+                });
+            }
+        }
+    }
+    Ok(samsung_ports)
+}
+
 #[tauri::command]
 async fn get_serial_ports() -> Result<Vec<String>, String> {
     run_blocking("Serial port scan", || Ok(get_serial_ports_blocking())).await
@@ -916,6 +970,7 @@ pub fn run() {
             get_app_dir,
             get_serial_ports,
             get_samsung_ports,
+            get_samsung_ports_detailed,
             resolve_usb_path,
             resolve_usb_paths,
             get_adb_devices_advanced,

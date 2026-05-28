@@ -17,6 +17,12 @@ type DeviceCache = {
   updated_at_ms: number;
 };
 
+type SamsungPortInfo = {
+  port_name: string;
+  usb_port: string;
+  serial_number?: string | null;
+};
+
 const playSuccessSound = () => {
   try {
     const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
@@ -353,13 +359,44 @@ export default function App() {
     }
   };
 
+  const getSelectedSamsungPorts = async (sourceList: string[]) => {
+    if (sourceList.length === 0) return [];
+
+    const samsungPorts = await invoke<SamsungPortInfo[]>("get_samsung_ports_detailed");
+    const selected = new Set(sourceList);
+    const selectedUsbPorts = new Set(
+      sourceList
+        .map(id => deviceDetails[id]?.usb_port)
+        .filter((port): port is string => Boolean(port))
+    );
+
+    const matched = samsungPorts.filter(port => {
+      const serial = port.serial_number || "";
+      return selected.has(serial) || (port.usb_port && selectedUsbPorts.has(port.usb_port));
+    });
+
+    return [...new Set(matched.map(port => port.port_name))];
+  };
+
   const skipWz = async (isSequence = false, manualSelection?: string[]) => {
     if (!isSequence) setLoading(true);
     appendLog("Tahap 1: Inisialisasi AT Exploit...");
-    const ports: string[] = await invoke("get_samsung_ports");
-    if (ports.length > 0) { await Promise.all(ports.map(p => sendAT(false, p))); await delay(2500); }
     let active: string[] = [];
     const sourceList = manualSelection || selectedDevices;
+    if (sourceList.length === 0) {
+      appendLog("✗ Tidak ada perangkat yang dicentang untuk Skip Wizard.");
+      if (!isSequence) setLoading(false);
+      return;
+    }
+
+    const ports = await getSelectedSamsungPorts(sourceList);
+    if (ports.length > 0) {
+      await Promise.all(ports.map(p => sendAT(false, p)));
+      await delay(2500);
+    } else {
+      appendLog("⚠ Port modem Samsung untuk perangkat terpilih tidak ditemukan. Melanjutkan cek ADB tanpa broadcast AT.");
+    }
+
     for (let i = 0; i < 10; i++) {
       if (stopRequested.current) throw new Error("STOP");
       const list: string[] = await invoke("get_devices");
