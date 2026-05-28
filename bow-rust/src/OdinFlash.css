@@ -95,11 +95,11 @@
 /* Device Section */
 .devices-section {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 16px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 4px 10px 4px 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 4px 12px 4px;
   height: 150px;
   min-height: 150px;
   max-height: 150px;
@@ -110,6 +110,7 @@
 }
 
 .devices-section::-webkit-scrollbar {
+  height: 6px;
   width: 6px;
 }
 
@@ -126,8 +127,8 @@
   background: transparent;
   border: 2px dashed rgba(255, 255, 255, 0.1);
   border-radius: 10px;
-  width: 100%;
-  flex: 0 0 96px;
+  width: 280px;
+  flex: 0 0 280px;
   height: 96px;
   opacity: 0.5;
   animation: pulse-skeleton 2s infinite ease-in-out;
@@ -148,8 +149,8 @@
 .device-card {
   background: var(--bg-card);
   border-radius: 10px;
-  width: 100%;
-  flex: 0 0 96px;
+  width: 280px;
+  flex: 0 0 280px;
   min-height: 96px;
   height: 96px;
   display: flex;
