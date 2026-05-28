@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, forwardRef, useImperativeHandle, useMemo }
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ShieldAlert, RefreshCw } from "lucide-react";
+import { ShieldAlert, RefreshCw, DatabaseZap } from "lucide-react";
 import "./OdinFlash.css";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -106,9 +106,15 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     return verifying.reduce((acc, s) => acc + s.progress, 0) / verifying.length;
   }, [verifyState]);
 
+  const overallFlashProgress = useMemo(() => {
+    const flashing = Object.values(devices).filter(d => d.status === "Flashing...");
+    if (flashing.length === 0) return 0;
+    return flashing.reduce((acc, d) => acc + d.progress, 0) / flashing.length;
+  }, [devices]);
+
   useEffect(() => {
-    if (onVerifyProgress) onVerifyProgress(overallVerifyProgress);
-  }, [overallVerifyProgress, onVerifyProgress]);
+    if (onVerifyProgress) onVerifyProgress(overallFlashProgress > 0 ? overallFlashProgress : overallVerifyProgress);
+  }, [overallFlashProgress, overallVerifyProgress, onVerifyProgress]);
 
   // ── Busy device polling (cross-instance) ──────────────────────────────
 
@@ -129,6 +135,16 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       await invoke("reset_busy_devices");
       const busy: string[] = await invoke("get_busy_devices");
       setBusyDevices(busy);
+    } catch { }
+  };
+
+  const resetDeviceMetadata = async () => {
+    try {
+      await invoke("reset_device_cache");
+      Object.keys(localStorage)
+        .filter(key => key.startsWith("port_history_"))
+        .forEach(key => localStorage.removeItem(key));
+      setDevices({});
     } catch { }
   };
 
@@ -613,6 +629,9 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
         </button>
         <button className="btn-icon" style={{ color: "#ff453a" }} title="Reset Busy Status" onClick={resetBusy}>
           <ShieldAlert width={20} height={20} />
+        </button>
+        <button className="btn-icon btn-icon-warning" title="Reset Stored Device Metadata" onClick={resetDeviceMetadata}>
+          <DatabaseZap width={20} height={20} />
         </button>
         <button className="btn-icon" title="Clear files" onClick={clearFiles}>
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>

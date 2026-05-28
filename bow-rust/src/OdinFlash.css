@@ -5,7 +5,7 @@
   --primary: #2563eb;
   --primary-hover: #1d4ed8;
   --progress-blue: #3b82f6;
-  --progress-green: rgba(96, 165, 250, 0.42);
+  --progress-green: rgba(34, 197, 94, 0.34);
   --outline-green: #34d399;
   --text-main: #f1f1f1;
   --text-muted: #8e8e93;
@@ -95,18 +95,22 @@
 /* Device Section */
 .devices-section {
   display: flex;
+  flex-direction: column;
   gap: 16px;
-  overflow-x: auto;
-  padding: 4px 4px 12px 4px;
-  min-height: 100px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 10px 4px 4px;
+  height: 150px;
+  min-height: 150px;
+  max-height: 150px;
   margin-bottom: clamp(8px, 1.5vh, 16px);
   width: 100%;
   scrollbar-width: thin;
-  scrollbar-color: var(--primary) transparent;
+  scrollbar-color: var(--outline-green) transparent;
 }
 
 .devices-section::-webkit-scrollbar {
-  height: 6px;
+  width: 6px;
 }
 
 .devices-section::-webkit-scrollbar-track {
@@ -114,7 +118,7 @@
 }
 
 .devices-section::-webkit-scrollbar-thumb {
-  background: var(--primary);
+  background: var(--outline-green);
   border-radius: 10px;
 }
 
@@ -122,9 +126,9 @@
   background: transparent;
   border: 2px dashed rgba(255, 255, 255, 0.1);
   border-radius: 10px;
-  min-width: 320px;
-  flex: 0 0 auto;
-  height: 100%;
+  width: 100%;
+  flex: 0 0 96px;
+  height: 96px;
   opacity: 0.5;
   animation: pulse-skeleton 2s infinite ease-in-out;
 }
@@ -144,10 +148,10 @@
 .device-card {
   background: var(--bg-card);
   border-radius: 10px;
-  min-width: 260px;
-  flex: 0 0 auto;
-  min-height: 95px;
-  height: 100%;
+  width: 100%;
+  flex: 0 0 96px;
+  min-height: 96px;
+  height: 96px;
   display: flex;
   cursor: pointer;
   transition: background 0.3s, border 0.3s, box-shadow 0.3s;
@@ -196,7 +200,7 @@
   bottom: 0;
   width: 0%;
   background: var(--progress-green);
-  box-shadow: inset 0 0 22px rgba(191, 219, 254, 0.28);
+  box-shadow: inset 0 0 22px rgba(34, 197, 94, 0.22);
   z-index: 0;
   transition: width 0.1s linear;
 }
@@ -317,7 +321,7 @@
 
 .dev-status-success {
   color: #fff;
-  background-color: var(--progress-blue);
+  background-color: rgba(34, 197, 94, 0.85);
   font-size: clamp(10px, 1.4vh, 13px);
   padding: 2px 6px;
   border-radius: 4px;
@@ -341,7 +345,7 @@
 }
 
 .dev-status-flashing {
-  color: var(--progress-blue);
+  color: var(--outline-green);
   font-size: clamp(10px, 1.4vh, 13px);
   margin-left: 6px;
   animation: pulse-skeleton 1.5s infinite;
@@ -489,8 +493,9 @@
 /* Compact layout for small tiled windows (e.g. 2x2 grid) */
 @media (max-height: 650px) {
   .devices-section {
-    min-height: 84px;
-    padding-bottom: 8px;
+    height: 120px;
+    min-height: 120px;
+    max-height: 120px;
   }
 
   .firmware-card {
@@ -628,6 +633,10 @@
 
 .btn-icon:hover {
   background: #3a3a3c;
+}
+
+.btn-icon-warning {
+  color: #f59e0b;
 }
 
 .btn-icon:disabled {

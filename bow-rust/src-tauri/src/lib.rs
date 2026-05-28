@@ -841,6 +841,14 @@ fn reset_busy_devices() {
 }
 
 #[tauri::command]
+fn reset_device_cache() {
+    let mut state = read_busy_state();
+    state.adb_devices.clear();
+    state.updated_at_ms = now_ms();
+    write_busy_state(&state);
+}
+
+#[tauri::command]
 fn save_device_cache(devices: Vec<CachedAdbDevice>) {
     let mut state = read_busy_state();
     state.adb_devices = devices;
@@ -923,6 +931,7 @@ pub fn run() {
             clear_busy,
             get_busy_devices,
             reset_busy_devices,
+            reset_device_cache,
             save_device_cache,
             get_device_cache,
             emergency_stop
