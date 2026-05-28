@@ -1010,7 +1010,7 @@ export default function App() {
                     <div
                       key={id}
                       onClick={() => !busyDevices.includes(id) && toggleDevice(id)}
-                      className={`h-[96px] shrink-0 p-4 rounded-xl border transition-all cursor-pointer relative overflow-hidden ${busyDevices.includes(id) ? 'opacity-50 grayscale cursor-not-allowed border-white/5 bg-white/5' : selectedDevices.includes(id) ? 'border-white shadow-[0_0_15px_rgba(255,255,255,0.25)]' : 'border-[#222] hover:border-white/10'}`}
+                      className={`h-[76px] shrink-0 p-4 rounded-xl border transition-all cursor-pointer relative overflow-hidden ${busyDevices.includes(id) ? 'opacity-50 grayscale cursor-not-allowed border-white/5 bg-white/5' : selectedDevices.includes(id) ? 'border-white shadow-[0_0_15px_rgba(255,255,255,0.25)]' : 'border-[#222] hover:border-white/10'}`}
                     >
                       {/* Progress Bar Background */}
                       {(() => {
@@ -1043,7 +1043,7 @@ export default function App() {
                       )}
                       
                       <div className="relative z-10">
-                        <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center justify-between h-full">
                           <div className="flex flex-col min-w-0">
                             <span className="text-[17px] font-bold truncate pr-4 leading-tight">{deviceDetails[id]?.['ro.product.model'] || deviceDetails[id]?._model || id}</span>
                             <span className="text-[11px] text-white/25 font-mono tracking-tight">SN: {id} &bull; {deviceDetails[id]?.usb_port || 'Unknown Port'}</span>
@@ -1051,10 +1051,6 @@ export default function App() {
                           <div className={`w-6 h-6 border flex items-center justify-center transition-all ${selectedDevices.includes(id) ? 'bg-white border-white' : 'border-white/10'}`}>
                             {selectedDevices.includes(id) && <Check className="w-3.5 h-3.5 text-black font-black" />}
                           </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4 pt-3 border-t border-white/5">
-                          <div className="flex flex-col min-w-0"><span className="text-[9px] opacity-25 uppercase font-black tracking-widest mb-1">PDA</span><span className="text-[11px] font-mono truncate text-blue-400/80">{deviceDetails[id]?.['ro.build.PDA'] || 'N/A'}</span></div>
-                          <div className="flex flex-col min-w-0 items-end"><span className="text-[9px] opacity-25 uppercase font-black tracking-widest mb-1">Region</span><span className="text-[11px] font-mono text-white/60">{deviceDetails[id]?.['ro.csc.sales_code'] || 'N/A'}</span></div>
                         </div>
                       </div>
                     </div>
