@@ -201,9 +201,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
 
   useEffect(() => {
     scanDevices();
-    const interval = setInterval(() => {
-      if (!isFlashingRef.current) scanDevices();
-    }, 5000);
+    const interval = setInterval(scanDevices, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -608,7 +606,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
             <span>{readyToFlashCount > 0 ? "START FLASHING" : anyFlashing ? "FLASHING..." : "START FLASHING"}</span>
           </div>
         </button>
-        <button className="btn-icon" title="Refresh Devices" onClick={forceRefresh} disabled={anyFlashing}>
+        <button className="btn-icon" title="Refresh Devices" onClick={forceRefresh}>
           <RefreshCw width={20} height={20} />
         </button>
         <button className="btn-icon" style={{ color: "#ff453a" }} title="Reset Busy Status" onClick={resetBusy}>
