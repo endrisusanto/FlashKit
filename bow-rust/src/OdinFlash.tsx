@@ -492,23 +492,10 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
           </div>
         ) : (
           Object.entries(devices).map(([dev, data]) => (
-            <div
-              key={dev}
-              className={`device-card ${data.status === "Flashing..." ? "flashing-state" : ""} ${busyDevices.includes(dev) && data.status === "Ready" ? "busy-state" : ""}`}
+              <div key={dev} className={`device-card ${data.status === "Flashing..." ? "flashing-state" : ""}`}
               onClick={() => setLogModal({ device: dev, log: data.log })}
             >
               <div className="dev-progress-bg" style={{ width: `${data.progress}%` }}></div>
-              {/* BUSY badge jika device ini sedang dipakai instance lain */}
-              {busyDevices.includes(dev) && data.status === "Ready" && (
-                <div style={{
-                  position: 'absolute', top: 6, right: 8,
-                  background: '#dc2626', color: 'white',
-                  fontSize: '9px', fontWeight: 900, letterSpacing: '0.15em',
-                  padding: '2px 7px', borderRadius: '4px',
-                  textTransform: 'uppercase', zIndex: 10,
-                  boxShadow: '0 0 8px rgba(220,38,38,0.5)'
-                }}>BUSY</div>
-              )}
               <div className="dev-content">
                 <div className="dev-icon-area">
                   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

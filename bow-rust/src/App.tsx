@@ -566,7 +566,8 @@ export default function App() {
 
         await invoke("run_adb", { args: ["-s", dev, "shell", "am instrument -e method saveConfiguration -w com.android.tradefed.utils.wifi/.WifiUtil"] });
         await delay(2000);
-        // Jangan uninstall WifiUtil di sini agar profil tetap tersimpan di sistem
+        // Uninstall WifiUtil setelah profil tersimpan — profil sudah disimpan oleh saveConfiguration
+        try { await invoke("run_adb", { args: ["-s", dev, "shell", "pm uninstall com.android.tradefed.utils.wifi"] }); } catch { }
         appendLog(`[${dev}] ✓ WiFi Connect SELESAI`);
       } catch (e: any) { appendLog(`[${dev}] ✗ GAGAL: ${e}`); }
     }));
