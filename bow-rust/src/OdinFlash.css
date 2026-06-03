@@ -156,8 +156,8 @@
 .device-card {
   background: var(--bg-card);
   border-radius: 10px;
-  width: 280px;
-  flex: 0 0 280px;
+  width: 360px;
+  flex: 0 0 360px;
   min-height: 96px;
   height: 96px;
   display: flex;

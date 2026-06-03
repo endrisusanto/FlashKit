@@ -75,13 +75,15 @@ install_linux_package() {
   rpm_file="$(latest_file "$BUNDLE_DIR/rpm" "*.rpm")"
 
   if [[ "$LINUX_FAMILY" == "deb" && -n "$deb_file" ]] && command -v apt >/dev/null 2>&1; then
-    local pkg_name
+    local pkg_name pkg_version installed_version
     pkg_name="$(dpkg-deb -f "$deb_file" Package 2>/dev/null || echo "")"
-    if [[ -n "$pkg_name" ]] && dpkg -l "$pkg_name" >/dev/null 2>&1; then
+    pkg_version="$(dpkg-deb -f "$deb_file" Version 2>/dev/null || echo "")"
+    installed_version="$(dpkg-query -W -f='${Version}' "$pkg_name" 2>/dev/null || echo "")"
+    if [[ -n "$pkg_name" && "$installed_version" == "$pkg_version" ]]; then
       echo "Installing DEB package (Reinstalling): $deb_file"
       sudo apt install --reinstall -y "$deb_file"
     else
-      echo "Installing DEB package: $deb_file"
+      echo "Installing/Upgrading DEB package: $deb_file"
       sudo apt install -y "$deb_file"
     fi
     return
@@ -94,26 +96,26 @@ install_linux_package() {
   fi
 
   if [[ "$LINUX_FAMILY" == "rpm" && -n "$rpm_file" ]] && command -v dnf >/dev/null 2>&1; then
-    local pkg_name
-    pkg_name="$(rpm -qp --queryformat '%{NAME}' "$rpm_file" 2>/dev/null || echo "")"
-    if [[ -n "$pkg_name" ]] && rpm -q "$pkg_name" >/dev/null 2>&1; then
+    local pkg_full_name
+    pkg_full_name="$(rpm -qp "$rpm_file" 2>/dev/null || echo "")"
+    if [[ -n "$pkg_full_name" ]] && rpm -q "$pkg_full_name" >/dev/null 2>&1; then
       echo "Installing RPM package (Reinstalling): $rpm_file"
       sudo dnf reinstall -y "$rpm_file"
     else
-      echo "Installing RPM package: $rpm_file"
+      echo "Installing/Upgrading RPM package: $rpm_file"
       sudo dnf install -y "$rpm_file"
     fi
     return
   fi
 
   if [[ "$LINUX_FAMILY" == "rpm" && -n "$rpm_file" ]] && command -v yum >/dev/null 2>&1; then
-    local pkg_name
-    pkg_name="$(rpm -qp --queryformat '%{NAME}' "$rpm_file" 2>/dev/null || echo "")"
-    if [[ -n "$pkg_name" ]] && rpm -q "$pkg_name" >/dev/null 2>&1; then
+    local pkg_full_name
+    pkg_full_name="$(rpm -qp "$rpm_file" 2>/dev/null || echo "")"
+    if [[ -n "$pkg_full_name" ]] && rpm -q "$pkg_full_name" >/dev/null 2>&1; then
       echo "Installing RPM package (Reinstalling): $rpm_file"
       sudo yum reinstall -y "$rpm_file"
     else
-      echo "Installing RPM package: $rpm_file"
+      echo "Installing/Upgrading RPM package: $rpm_file"
       sudo yum install -y "$rpm_file"
     fi
     return
@@ -133,26 +135,28 @@ install_linux_package() {
 
   if [[ -z "$LINUX_FAMILY" ]]; then
     if [[ -n "$deb_file" ]] && command -v apt >/dev/null 2>&1; then
-      local pkg_name
+      local pkg_name pkg_version installed_version
       pkg_name="$(dpkg-deb -f "$deb_file" Package 2>/dev/null || echo "")"
-      if [[ -n "$pkg_name" ]] && dpkg -l "$pkg_name" >/dev/null 2>&1; then
+      pkg_version="$(dpkg-deb -f "$deb_file" Version 2>/dev/null || echo "")"
+      installed_version="$(dpkg-query -W -f='${Version}' "$pkg_name" 2>/dev/null || echo "")"
+      if [[ -n "$pkg_name" && "$installed_version" == "$pkg_version" ]]; then
         echo "Installing DEB package (Reinstalling): $deb_file"
         sudo apt install --reinstall -y "$deb_file"
       else
-        echo "Installing DEB package: $deb_file"
+        echo "Installing/Upgrading DEB package: $deb_file"
         sudo apt install -y "$deb_file"
       fi
       return
     fi
 
     if [[ -n "$rpm_file" ]] && command -v dnf >/dev/null 2>&1; then
-      local pkg_name
-      pkg_name="$(rpm -qp --queryformat '%{NAME}' "$rpm_file" 2>/dev/null || echo "")"
-      if [[ -n "$pkg_name" ]] && rpm -q "$pkg_name" >/dev/null 2>&1; then
+      local pkg_full_name
+      pkg_full_name="$(rpm -qp "$rpm_file" 2>/dev/null || echo "")"
+      if [[ -n "$pkg_full_name" ]] && rpm -q "$pkg_full_name" >/dev/null 2>&1; then
         echo "Installing RPM package (Reinstalling): $rpm_file"
         sudo dnf reinstall -y "$rpm_file"
       else
-        echo "Installing RPM package: $rpm_file"
+        echo "Installing/Upgrading RPM package: $rpm_file"
         sudo dnf install -y "$rpm_file"
       fi
       return

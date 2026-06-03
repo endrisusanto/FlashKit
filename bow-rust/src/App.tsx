@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X, Download, ShieldAlert, DatabaseZap } from "lucide-react";
 import OdinFlash, { OdinFlashRef, DeviceData } from "./OdinFlash";
@@ -190,7 +190,7 @@ export default function App() {
     lastDeviceCacheAt.current = cache.updated_at_ms;
     setDevices(cachedDevices);
     setDeviceDetails(cachedDetails);
-    setSelectedDevices(prev => prev.length === 0 ? cachedDevices : prev.filter(id => cachedDevices.includes(id)));
+    setSelectedDevices(prev => prev.filter(id => cachedDevices.includes(id)));
   };
 
   useEffect(() => {
@@ -263,7 +263,6 @@ export default function App() {
       }
 
       setDeviceDetails(details);
-      if (selectedDevices.length === 0) setSelectedDevices(list);
       await invoke("save_device_cache", {
         devices: advList.map((adv: any) => {
           const detail = details[adv.serial] || {};
@@ -294,10 +293,6 @@ export default function App() {
 
   useEffect(() => {
     refreshDevices(true);
-    const interval = setInterval(() => {
-      if (!loadingRef.current) refreshDevices(true);
-    }, 8000);
-    return () => clearInterval(interval);
   }, []);
 
   const resetBusy = async () => {
@@ -753,33 +748,67 @@ export default function App() {
     setSelectedDevices(p => p.includes(id) ? p.filter(d => d !== id) : [...p, id]);
   };
 
+  const mergedDevices = useMemo(() => {
+    const list: { id: string; type: "adb" | "odin"; odinKey?: string; serial?: string; model?: string; port?: string }[] = [];
+    const seenSerials = new Set<string>();
+
+    // 1. Add all ADB devices first
+    devices.forEach(serial => {
+      seenSerials.add(serial);
+      const detail = deviceDetails[serial] || {};
+      list.push({
+        id: serial,
+        type: "adb",
+        serial: serial,
+        model: detail['ro.product.model'] || detail._model,
+        port: detail.usb_port,
+      });
+    });
+
+    // 2. Add Odin devices
+    Object.entries(odinDeviceStates).forEach(([path, data]) => {
+      const serial = data.serial;
+      const model = data.model;
+      const port = data.port;
+      if (serial && seenSerials.has(serial)) {
+        // Link existing ADB entry to Odin state
+        const idx = list.findIndex(item => item.serial === serial);
+        if (idx !== -1) {
+          list[idx].odinKey = path;
+        }
+      } else {
+        if (serial) {
+          seenSerials.add(serial);
+        }
+        list.push({
+          id: serial || path,
+          type: "odin",
+          odinKey: path,
+          serial: serial,
+          model: model,
+          port: port,
+        });
+      }
+    });
+
+    return list;
+  }, [devices, deviceDetails, odinDeviceStates]);
+
   const selectAll = () => {
-    const available = devices.filter(id => !busyDevices.includes(id));
+    const available = mergedDevices.filter(d => !busyDevices.includes(d.id)).map(d => d.id);
     setSelectedDevices(selectedDevices.length === available.length ? [] : [...available]);
   };
 
   const downloadAvailableDevices = devices.filter(id => !busyDevices.includes(id));
   const allDownloadDevicesSelected = downloadAvailableDevices.length > 0 && downloadAvailableDevices.every(id => downloadSelectedDevices.includes(id));
 
-  const getOdinStateForDevice = (id: string, index: number) => {
-    const exact = Object.values(odinDeviceStates).find(d => d.serial === id);
-    if (exact) return exact;
-    const odinEntries = Object.values(odinDeviceStates);
-    const byIndex = odinEntries[index];
-    return byIndex && !byIndex.serial ? byIndex : undefined;
-  };
+
 
   if (showSplash) {
     return (
-      <div className="flex flex-col h-screen bg-[#050505] items-center justify-center text-white select-none relative overflow-hidden" data-tauri-drag-region>
-        <div className="relative flex items-center justify-center pointer-events-none">
-          <div className="absolute w-40 h-40 bg-blue-500/20 rounded-full blur-[50px] animate-pulse" />
-          <div className="absolute w-32 h-32 bg-purple-500/20 rounded-full blur-[40px] animate-pulse delay-75" />
-          <div className="z-10 flex flex-col items-center gap-8">
-            <div className="w-28 h-28 flex items-center justify-center shadow-[0_0_60px_rgba(37,99,235,0.4)] rounded-[2rem] overflow-hidden bg-white/5 border border-white/10 backdrop-blur-md p-2">
-              <img src={logo} alt="FlashKit Logo" className="w-full h-full object-contain drop-shadow-2xl" />
-            </div>
-          </div>
+      <div className="flex flex-col h-screen bg-[#050505] items-center justify-center text-white select-none" data-tauri-drag-region>
+        <div className="w-28 h-28 flex items-center justify-center rounded-[2rem] overflow-hidden bg-white/5 border border-white/10 p-2">
+          <img src={logo} alt="FlashKit Logo" className="w-full h-full object-contain" />
         </div>
       </div>
     );
@@ -986,13 +1015,13 @@ export default function App() {
               id="tab-odin"
               onClick={() => setActiveTab("odin")}
               className={`h-full px-6 md:px-12 text-[11px] md:text-[13px] font-black uppercase tracking-[0.1em] md:tracking-[0.2em] border-b-[3px] transition-all relative overflow-hidden ${activeTab === "odin"
-                ? "border-green-500 text-green-400 bg-green-500/[0.02]"
+                ? "border-blue-500 text-blue-400 bg-blue-500/[0.02]"
                 : "border-transparent text-white/30 hover:text-white/60 hover:bg-white/[0.01]"
                 }`}
             >
               {currentVerifyProgress > 0 && currentVerifyProgress < 100 && (
                 <div 
-                  className="absolute bottom-0 left-0 h-full bg-green-500/30 shadow-[0_0_24px_rgba(34,197,94,0.35)] transition-all duration-300 pointer-events-none"
+                  className="absolute bottom-0 left-0 h-full bg-blue-500/30 shadow-[0_0_24px_rgba(59,130,246,0.35)] transition-all duration-300 pointer-events-none"
                   style={{ width: `${currentVerifyProgress}%` }}
                 />
               )}
@@ -1020,7 +1049,7 @@ export default function App() {
             {/* Left: Device Pool */}
             <div className="w-full md:w-1/3 md:min-w-[350px] md:max-w-[500px] flex flex-col gap-4 md:gap-8 shrink-0 min-h-[300px] md:min-h-0">
               <div className="flex flex-col gap-3">
-                <h3 className="text-[11px] font-black text-white/40 uppercase tracking-widest text-center">Daftar Perangkat ({devices.length})</h3>
+                <h3 className="text-[11px] font-black text-white/40 uppercase tracking-widest text-center">Daftar Perangkat ({mergedDevices.length})</h3>
                 <div className="flex items-center justify-center gap-3 px-2">
                   <button onClick={() => refreshDevices()} title="Refresh Device List" className="p-2.5 bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all rounded-xl shadow-sm">
                     <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-blue-500' : 'text-white/60'}`} />
@@ -1032,66 +1061,100 @@ export default function App() {
                     <DatabaseZap className="w-4 h-4 text-amber-500/70 group-hover:text-amber-400 transition-colors" />
                   </button>
                   <button onClick={selectAll} className="flex-1 py-2.5 bg-white/5 border border-white/10 text-[10px] font-black uppercase hover:bg-white/10 hover:border-white/20 transition-all tracking-widest rounded-xl shadow-sm">
-                    {selectedDevices.length === devices.filter(id => !busyDevices.includes(id)).length ? "Uncheck All" : "Select All"}
+                    {selectedDevices.length === mergedDevices.filter(d => !busyDevices.includes(d.id)).length ? "Uncheck All" : "Select All"}
                   </button>
                 </div>
               </div>
               <div className="flex-1 flex flex-col overflow-y-auto gap-3 pr-2 custom-scrollbar py-2 max-h-[calc(100vh-310px)] min-h-0">
-                {devices.length === 0 ? (
+                {mergedDevices.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center opacity-10 gap-4 border-2 border-dashed border-white/10">
                     <Smartphone className="w-12 h-12" />
                     <span className="text-[10px] font-black uppercase tracking-widest">Menunggu Koneksi</span>
                   </div>
                 ) : (
-                  devices.map((id, index) => (
-                    <div
-                      key={id}
-                      onClick={() => !busyDevices.includes(id) && toggleDevice(id)}
-                      className={`h-[76px] shrink-0 p-4 rounded-xl border transition-all cursor-pointer relative overflow-hidden ${busyDevices.includes(id) ? 'opacity-50 grayscale cursor-not-allowed border-white/5 bg-white/5' : selectedDevices.includes(id) ? 'border-white shadow-[0_0_15px_rgba(255,255,255,0.25)]' : 'border-[#222] hover:border-white/10'}`}
-                    >
-                      {/* Progress Bar Background */}
-                      {(() => {
-                        const odinData = getOdinStateForDevice(id, index);
-                        if (odinData && odinData.status === "Flashing...") {
-                          return (
-                            <div 
-                              className="absolute inset-y-0 left-0 bg-green-500/35 shadow-[0_0_35px_rgba(34,197,94,0.35)] transition-all duration-300 z-0" 
-                              style={{ width: `${odinData.progress}%` }} 
-                            />
-                          );
-                        }
-                        if (odinData && odinData.status === "Pass") {
-                          return (
-                            <div className="absolute inset-0 bg-green-500/15 z-0" />
-                          );
-                        }
-                        return null;
-                      })()}
+                  mergedDevices.map((item) => {
+                    const id = item.id;
+                    const odinData = item.odinKey ? odinDeviceStates[item.odinKey] : undefined;
+                    const isOdinMode = item.type === "odin" || (odinData !== undefined);
+                    const isFlashing = odinData?.status === "Flashing...";
+                    const isPass = odinData?.status === "Pass";
+                    const isFail = odinData?.status === "Fail";
 
-                      {busyDevices.includes(id) && (
-                        <div style={{
-                          position: 'absolute', top: 12, right: 12,
-                          background: '#dc2626', color: 'white',
-                          fontSize: '10px', fontWeight: 900, letterSpacing: '0.15em',
-                          padding: '2px 8px', borderRadius: '4px',
-                          textTransform: 'uppercase', zIndex: 10,
-                          boxShadow: '0 0 10px rgba(220,38,38,0.5)'
-                        }}>BUSY</div>
-                      )}
-                      
-                      <div className="relative z-10">
-                        <div className="flex items-center justify-between h-full">
-                          <div className="flex flex-col min-w-0">
-                            <span className="text-[17px] font-bold truncate pr-4 leading-tight">{deviceDetails[id]?.['ro.product.model'] || deviceDetails[id]?._model || id}</span>
-                            <span className="text-[11px] text-white/25 font-mono tracking-tight">SN: {id} &bull; {deviceDetails[id]?.usb_port || 'Unknown Port'}</span>
-                          </div>
-                          <div className={`w-6 h-6 border flex items-center justify-center transition-all ${selectedDevices.includes(id) ? 'bg-white border-white' : 'border-white/10'}`}>
-                            {selectedDevices.includes(id) && <Check className="w-3.5 h-3.5 text-black font-black" />}
+                    return (
+                      <div
+                        key={id}
+                        onClick={() => !busyDevices.includes(id) && toggleDevice(id)}
+                        className={`h-[76px] shrink-0 p-4 rounded-xl border transition-all cursor-pointer relative overflow-hidden ${
+                          busyDevices.includes(id) 
+                            ? 'opacity-50 grayscale cursor-not-allowed border-white/5 bg-white/5' 
+                            : selectedDevices.includes(id) 
+                              ? isFlashing 
+                                ? 'border-blue-500 bg-blue-500/10 shadow-[0_0_15px_rgba(59,130,246,0.3)]' 
+                                : isPass 
+                                  ? 'border-green-500 bg-green-500/10 shadow-[0_0_15px_rgba(34,197,94,0.3)]'
+                                  : isFail
+                                    ? 'border-red-500 bg-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.3)]'
+                                    : 'border-white shadow-[0_0_15px_rgba(255,255,255,0.25)]' 
+                              : isFlashing
+                                ? 'border-blue-500/30'
+                                : 'border-[#222] hover:border-white/10'
+                        }`}
+                      >
+                        {/* Progress Bar Background */}
+                        {isFlashing && odinData && (
+                          <div 
+                            className="absolute inset-y-0 left-0 bg-blue-500/25 shadow-[0_0_35px_rgba(59,130,246,0.25)] transition-all duration-300 z-0" 
+                            style={{ width: `${odinData.progress}%` }} 
+                          />
+                        )}
+                        {isPass && (
+                          <div className="absolute inset-0 bg-green-500/10 z-0" />
+                        )}
+                        {isFail && (
+                          <div className="absolute inset-0 bg-red-500/10 z-0" />
+                        )}
+
+                        {busyDevices.includes(id) && (
+                          <div style={{
+                            position: 'absolute', top: 12, right: 12,
+                            background: '#dc2626', color: 'white',
+                            fontSize: '10px', fontWeight: 900, letterSpacing: '0.15em',
+                            padding: '2px 8px', borderRadius: '4px',
+                            textTransform: 'uppercase', zIndex: 10,
+                            boxShadow: '0 0 10px rgba(220,38,38,0.5)'
+                          }}>BUSY</div>
+                        )}
+                        
+                        <div className="relative z-10 h-full flex flex-col justify-center">
+                          <div className="flex items-center justify-between">
+                            <div className="flex flex-col min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[16px] font-bold truncate pr-1 leading-tight">
+                                  {item.model || id}
+                                </span>
+                                {isOdinMode && (
+                                  <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                                    isFlashing ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30 animate-pulse' :
+                                    isPass ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                                    isFail ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                                    'bg-blue-500/10 text-blue-400/80 border border-blue-500/20'
+                                  }`}>
+                                    {isFlashing ? `Flashing ${odinData?.progress}%` : odinData?.status || "Odin Mode"}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[11px] text-white/25 font-mono tracking-tight mt-0.5">
+                                {item.serial ? `SN: ${item.serial}` : 'SN: Unknown'} &bull; {item.port || 'Unknown Port'}
+                              </span>
+                            </div>
+                            <div className={`w-6 h-6 border flex items-center justify-center transition-all shrink-0 ${selectedDevices.includes(id) ? 'bg-white border-white' : 'border-white/10'}`}>
+                              {selectedDevices.includes(id) && <Check className="w-3.5 h-3.5 text-black font-black" />}
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -1245,8 +1308,8 @@ export default function App() {
 
         <footer className="h-10 bg-[#0d0d0d] border-t border-[#222] flex items-center px-8 justify-between shrink-0 relative z-50">
           <div className="flex items-center gap-4">
-            <div className={`w-2.5 h-2.5 rounded-full ${devices.length > 0 ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : 'bg-white/10'}`} />
-            <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{devices.length} Units Connected</span>
+            <div className={`w-2.5 h-2.5 rounded-full ${mergedDevices.length > 0 ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.4)]' : 'bg-white/10'}`} />
+            <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{mergedDevices.length} Units Connected</span>
           </div>
           <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.8.3 &bull; FlashKit By Endri-Pro</span>
         </footer>

@@ -180,7 +180,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
               model,
               status: "Ready",
               progress: 0,
-              checked: serial ? (selectedSerialsRef.current?.includes(serial) ?? false) : false,
+              checked: false,
               log: `${getTimestamp()} Attached at ${dev}\n${getTimestamp()} Waiting for flash command...`,
             };
           }
@@ -201,7 +201,9 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
 
   useEffect(() => {
     scanDevices();
-    const interval = setInterval(scanDevices, 4000);
+    const interval = setInterval(() => {
+      if (!isFlashingRef.current) scanDevices();
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -214,13 +216,13 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
         let matchedBySerial = false;
         
         for (const [key, dev] of Object.entries(next)) {
+          const shouldBeChecked = (dev.serial && selectedSerials.includes(dev.serial)) || selectedSerials.includes(key);
           if (dev.serial) {
             matchedBySerial = true;
-            const shouldBeChecked = selectedSerials.includes(dev.serial);
-            if (dev.checked !== shouldBeChecked) {
-              next[key] = { ...dev, checked: shouldBeChecked };
-              changed = true;
-            }
+          }
+          if (dev.checked !== shouldBeChecked) {
+            next[key] = { ...dev, checked: shouldBeChecked };
+            changed = true;
           }
         }
         
@@ -526,29 +528,14 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                         
                         // Sync back to App.tsx
                         if (setSelectedSerials) {
-                          if (data.serial) {
-                            setSelectedSerials(prev => {
-                              if (newChecked) {
-                                return prev.includes(data.serial!) ? prev : [...prev, data.serial!];
-                              } else {
-                                return prev.filter(s => s !== data.serial);
-                              }
-                            });
-                          } else if (allSerials) {
-                            // Windows fallback: match by index
-                            const odinKeys = Object.keys(devices);
-                            const idx = odinKeys.indexOf(dev);
-                            const adbSerial = allSerials[idx];
-                            if (adbSerial) {
-                              setSelectedSerials(prev => {
-                                if (newChecked) {
-                                  return prev.includes(adbSerial) ? prev : [...prev, adbSerial];
-                                } else {
-                                  return prev.filter(s => s !== adbSerial);
-                                }
-                              });
+                          const idToSync = data.serial || dev;
+                          setSelectedSerials(prev => {
+                            if (newChecked) {
+                              return prev.includes(idToSync) ? prev : [...prev, idToSync];
+                            } else {
+                              return prev.filter(s => s !== idToSync);
                             }
-                          }
+                          });
                         }
                       }
                     }}
