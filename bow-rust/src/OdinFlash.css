@@ -18,6 +18,22 @@
   gap: clamp(8px, 1.5vh, 16px);
   color: var(--text-main);
   position: relative;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--outline-blue) transparent;
+}
+
+.odin-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.odin-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.odin-container::-webkit-scrollbar-thumb {
+  background: var(--outline-blue);
+  border-radius: 10px;
 }
 
 /* Modal Overlay */
@@ -355,7 +371,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-height: auto;
 }
 
 .firmware-card {
@@ -365,7 +381,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-height: auto;
 }
 
 .section-title {
@@ -382,7 +398,7 @@
   flex-direction: column;
   justify-content: space-evenly;
   gap: 1vh;
-  min-height: 0;
+  min-height: auto;
 }
 
 .file-row {
@@ -391,7 +407,7 @@
   gap: 12px;
   width: 100%;
   flex: 1;
-  min-height: 0;
+  min-height: 48px;
 }
 
 .file-label {
