@@ -310,6 +310,61 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     return () => unlisteners.forEach(fn => fn());
   }, [Object.keys(devices).join(",")]);
 
+  // Listen to IPC shared progress from other instances
+  useEffect(() => {
+    const unlisten = listen<{ device: string; line: string }>("flash-progress-ipc", (event) => {
+      const { device, line } = event.payload;
+
+      setDevices(prev => {
+        if (!prev[device]) return prev;
+
+        const currentDev = prev[device];
+        let nextStatus = currentDev.status;
+        let nextProgress = currentDev.progress;
+        let nextLog = currentDev.log;
+
+        if (line.startsWith("STATUS:Pass:")) {
+          const result = line.replace("STATUS:Pass:", "");
+          nextStatus = "Pass";
+          nextProgress = 100;
+          nextLog = `${nextLog}\n${getTimestamp()} ${result}`;
+        } else if (line.startsWith("STATUS:Fail:")) {
+          const err = line.replace("STATUS:Fail:", "");
+          nextStatus = "Fail";
+          nextLog = `${nextLog}\n${getTimestamp()} ERROR: ${err}`;
+        } else {
+          if (nextStatus !== "Flashing...") {
+            nextStatus = "Flashing...";
+          }
+          const pctMatch = line.match(/\((\d+)%\)/g);
+          let clean = line;
+          if (pctMatch) {
+            const lastPct = parseInt(pctMatch[pctMatch.length - 1].replace(/\D/g, ""), 10);
+            nextProgress = lastPct;
+            clean = line.replace(/\(\d+%\)/g, "").trim();
+          }
+          if (clean) {
+            nextLog = `${nextLog}\n${getTimestamp()} ${clean}`;
+          }
+        }
+
+        return {
+          ...prev,
+          [device]: {
+            ...currentDev,
+            status: nextStatus,
+            progress: nextProgress,
+            log: nextLog,
+          }
+        };
+      });
+    });
+
+    return () => {
+      unlisten.then(fn => fn());
+    };
+  }, []);
+
   // ── File selection & verification ────────────────────────────────────
 
   async function selectFile(slot: SlotKey) {

@@ -1,7 +1,10 @@
-use std::io::{BufReader, Read};
+use std::io::{BufRead, BufReader, Read};
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{channel, Sender};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
@@ -61,6 +64,168 @@ where
 
 fn join_pipe_output(handle: Option<thread::JoinHandle<String>>) -> String {
     handle.and_then(|h| h.join().ok()).unwrap_or_default()
+}
+
+// ─────────────────────────────────────────────
+//  IPC - Shared Progress mechanism via TCP Loopback
+// ─────────────────────────────────────────────
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct IpcProgressMessage {
+    device: String,
+    line: String,
+}
+
+static IPC_SENDER: Mutex<Option<Sender<String>>> = Mutex::new(None);
+
+fn broadcast_progress(device_id: &str, line: &str) {
+    let msg = IpcProgressMessage {
+        device: device_id.to_string(),
+        line: line.to_string(),
+    };
+    if let Ok(serialized) = serde_json::to_string(&msg) {
+        if let Ok(guard) = IPC_SENDER.lock() {
+            if let Some(tx) = &*guard {
+                let _ = tx.send(serialized);
+            }
+        }
+    }
+}
+
+fn broadcast_to_clients(
+    clients: &Arc<Mutex<Vec<TcpStream>>>,
+    msg: &str,
+    exclude: Option<&TcpStream>,
+) {
+    use std::io::Write;
+    if let Ok(mut guard) = clients.lock() {
+        let mut to_remove = Vec::new();
+        for (i, client) in guard.iter_mut().enumerate() {
+            if let Some(exc) = exclude {
+                if let (Ok(addr1), Ok(addr2)) = (client.peer_addr(), exc.peer_addr()) {
+                    if addr1 == addr2 {
+                        continue;
+                    }
+                }
+            }
+            if writeln!(client, "{}", msg).is_err() {
+                to_remove.push(i);
+            }
+        }
+        for &idx in to_remove.iter().rev() {
+            guard.remove(idx);
+        }
+    }
+}
+
+fn remove_client(clients: &Arc<Mutex<Vec<TcpStream>>>, client_to_remove: &TcpStream) {
+    if let Ok(mut guard) = clients.lock() {
+        if let Ok(addr_to_remove) = client_to_remove.peer_addr() {
+            if let Some(pos) = guard.iter().position(|c| {
+                if let Ok(addr) = c.peer_addr() {
+                    addr == addr_to_remove
+                } else {
+                    false
+                }
+            }) {
+                guard.remove(pos);
+            }
+        }
+    }
+}
+
+fn emit_progress_locally(app: &AppHandle, msg_json: &str) {
+    if let Ok(msg) = serde_json::from_str::<IpcProgressMessage>(msg_json) {
+        let _ = app.emit("flash-progress-ipc", msg);
+    }
+}
+
+fn run_ipc_loop(app: AppHandle) {
+    let (tx, rx) = channel::<String>();
+    if let Ok(mut guard) = IPC_SENDER.lock() {
+        *guard = Some(tx);
+    }
+
+    loop {
+        match TcpListener::bind("127.0.0.1:9912") {
+            Ok(listener) => {
+                let clients = Arc::new(Mutex::new(Vec::new()));
+                let clients_clone = clients.clone();
+
+                let accept_handle = {
+                    let listener = listener.try_clone().unwrap();
+                    let clients = clients.clone();
+                    let app = app.clone();
+                    thread::spawn(move || {
+                        listener.set_nonblocking(false).ok();
+                        for stream in listener.incoming() {
+                            if let Ok(stream) = stream {
+                                let clients_list = clients.clone();
+                                let app_h = app.clone();
+                                {
+                                    if let Ok(mut guard) = clients.lock() {
+                                        guard.push(stream.try_clone().unwrap());
+                                    }
+                                }
+                                thread::spawn(move || {
+                                    let mut reader = BufReader::new(stream);
+                                    let mut line = String::new();
+                                    while reader.read_line(&mut line).is_ok() {
+                                        if line.is_empty() {
+                                            break;
+                                        }
+                                        let trimmed = line.trim().to_string();
+                                        broadcast_to_clients(&clients_list, &trimmed, Some(reader.get_ref()));
+                                        emit_progress_locally(&app_h, &trimmed);
+                                        line.clear();
+                                    }
+                                    remove_client(&clients_list, reader.get_ref());
+                                });
+                            }
+                        }
+                    })
+                };
+
+                while let Ok(msg) = rx.recv() {
+                    broadcast_to_clients(&clients_clone, &msg, None);
+                }
+                let _ = accept_handle.join();
+                break;
+            }
+            Err(_) => {
+                match TcpStream::connect("127.0.0.1:9912") {
+                    Ok(stream) => {
+                        let app_clone = app.clone();
+                        let stream_clone = stream.try_clone().unwrap();
+
+                        let read_handle = thread::spawn(move || {
+                            let mut reader = BufReader::new(stream_clone);
+                            let mut line = String::new();
+                            while reader.read_line(&mut line).is_ok() {
+                                if line.is_empty() {
+                                    break;
+                                }
+                                emit_progress_locally(&app_clone, line.trim());
+                                line.clear();
+                            }
+                        });
+
+                        let mut writer = stream;
+                        use std::io::Write;
+                        while let Ok(msg) = rx.recv() {
+                            if writeln!(writer, "{}", msg).is_err() {
+                                break;
+                            }
+                        }
+                        let _ = read_handle.join();
+                    }
+                    Err(_) => {
+                        thread::sleep(std::time::Duration::from_secs(2));
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ─────────────────────────────────────────────
@@ -336,12 +501,16 @@ fn odin_flash_device_blocking(
     let mut buffer = Vec::new();
     let mut byte_buf = [0u8; 1];
 
+    // Broadcast start of flash
+    broadcast_progress(&device_id, "=====================\nSTARTING ODIN ENGINE\n=====================");
+
     while reader.read_exact(&mut byte_buf).is_ok() {
         let b = byte_buf[0];
         if b == b'\n' || b == b'\r' {
             if !buffer.is_empty() {
                 let line = String::from_utf8_lossy(&buffer).to_string();
-                let _ = window.emit(&format!("flash-progress-{}", device_id), line);
+                let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
+                broadcast_progress(&device_id, &line);
                 buffer.clear();
             }
         } else {
@@ -351,29 +520,30 @@ fn odin_flash_device_blocking(
 
     if !buffer.is_empty() {
         let line = String::from_utf8_lossy(&buffer).to_string();
-        let _ = window.emit(&format!("flash-progress-{}", device_id), line);
+        let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
+        broadcast_progress(&device_id, &line);
     }
 
     let status = child.wait().map_err(|e| e.to_string())?;
     let stderr = join_pipe_output(stderr_reader);
 
     if status.success() {
-        Ok(format!(
-            "Flashing {} completed successfully.",
-            params.device
-        ))
-    } else if stderr.trim().is_empty() {
-        Err(format!(
-            "Flashing {} failed with status: {}",
-            params.device, status
-        ))
+        let success_msg = format!("Flashing {} completed successfully.", params.device);
+        broadcast_progress(&device_id, &format!("STATUS:Pass:{}", success_msg));
+        Ok(success_msg)
     } else {
-        Err(format!(
-            "Flashing {} failed with status: {}\n{}",
-            params.device,
-            status,
-            stderr.trim()
-        ))
+        let err_msg = if stderr.trim().is_empty() {
+            format!("Flashing {} failed with status: {}", params.device, status)
+        } else {
+            format!(
+                "Flashing {} failed with status: {}\n{}",
+                params.device,
+                status,
+                stderr.trim()
+            )
+        };
+        broadcast_progress(&device_id, &format!("STATUS:Fail:{}", err_msg));
+        Err(err_msg)
     }
 }
 
@@ -960,6 +1130,13 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        .setup(|app| {
+            let handle = app.handle().clone();
+            thread::spawn(move || {
+                run_ipc_loop(handle);
+            });
+            Ok(())
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
