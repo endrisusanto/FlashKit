@@ -503,6 +503,16 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                   </svg>
                 </div>
                 <div className="dev-info-area">
+                  {busyDevices.includes(dev) && (
+                    <div style={{
+                      position: 'absolute', top: 12, right: 50,
+                      background: '#dc2626', color: 'white',
+                      fontSize: '10px', fontWeight: 900, letterSpacing: '0.15em',
+                      padding: '2px 8px', borderRadius: '4px',
+                      textTransform: 'uppercase', zIndex: 10,
+                      boxShadow: '0 0 10px rgba(220,38,38,0.5)'
+                    }}>BUSY</div>
+                  )}
                   <div
                     className="custom-check-wrapper"
                     onClick={(e) => {
