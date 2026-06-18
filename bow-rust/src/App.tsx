@@ -144,7 +144,7 @@ export default function App() {
     stopRequested.current = true;
     setIsStopping(true);
     appendLog("‼ EMERGENCY STOP DIAKTIFKAN! Mematikan semua proses...");
-    
+
     try {
       await invoke("emergency_stop");
       appendLog("✓ Semua proses Odin & ADB telah dihentikan paksa.");
@@ -395,8 +395,8 @@ export default function App() {
     for (let i = 0; i < 10; i++) {
       if (stopRequested.current) throw new Error("STOP");
       const list: string[] = await invoke("get_devices");
-      active = sourceList.length > 0 
-        ? sourceList.filter(id => list.includes(id)) 
+      active = sourceList.length > 0
+        ? sourceList.filter(id => list.includes(id))
         : list;
       if (active.length > 0) break;
       if (isSequence) {
@@ -421,10 +421,10 @@ export default function App() {
       if (stopRequested.current) return;
       appendLog(`[${dev}] Memproses Skip Wizard...`);
       try {
-        const run = async (args: string[]) => { 
+        const run = async (args: string[]) => {
           if (stopRequested.current) return;
-          await invoke("run_adb", { args: ["-s", dev, "shell", ...args] }); 
-          await delay(100); 
+          await invoke("run_adb", { args: ["-s", dev, "shell", ...args] });
+          await delay(100);
         };
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apkLang] });
         await run(["am start -n net.sanapeli.adbchangelanguage/.AdbChangeLanguage --es language en --es country US"]);
@@ -466,8 +466,8 @@ export default function App() {
     for (let i = 0; i < 10; i++) {
       if (stopRequested.current) throw new Error("STOP");
       const list: string[] = await invoke("get_devices");
-      active = sourceList.length > 0 
-        ? sourceList.filter(id => list.includes(id)) 
+      active = sourceList.length > 0
+        ? sourceList.filter(id => list.includes(id))
         : list;
       if (active.length > 0) break;
       if (isSequence) {
@@ -484,10 +484,10 @@ export default function App() {
     await Promise.all(active.map(async (dev) => {
       if (stopRequested.current) return;
       try {
-        const run = async (args: string[]) => { 
+        const run = async (args: string[]) => {
           if (stopRequested.current) return;
-          await invoke("run_adb", { args: ["-s", dev, "shell", ...args] }); 
-          await delay(100); 
+          await invoke("run_adb", { args: ["-s", dev, "shell", ...args] });
+          await delay(100);
         };
         await run(["settings put global development_settings_enabled 1"]);
         await run(["settings put global adb_enabled 1"]);
@@ -516,8 +516,8 @@ export default function App() {
     for (let i = 0; i < 10; i++) {
       if (stopRequested.current) throw new Error("STOP");
       const list: string[] = await invoke("get_devices");
-      active = sourceList.length > 0 
-        ? sourceList.filter(id => list.includes(id)) 
+      active = sourceList.length > 0
+        ? sourceList.filter(id => list.includes(id))
         : list;
       if (active.length > 0) break;
       if (isSequence) {
@@ -533,9 +533,9 @@ export default function App() {
     appendLog(`──── WiFi Connect: ${ssid} ────`);
 
     let apk: string;
-    try { 
+    try {
       if (stopRequested.current) throw new Error("STOP");
-      apk = await invoke("get_resource_path", { name: "WifiUtil.apk" }); 
+      apk = await invoke("get_resource_path", { name: "WifiUtil.apk" });
     } catch (e) { appendLog(`ERR: ${e}`); if (!isSequence) setLoading(false); return; }
 
     await Promise.all(active.map(async (dev) => {
@@ -546,7 +546,7 @@ export default function App() {
         // Clean install to avoid signature mismatch
         try { await invoke("run_adb", { args: ["-s", dev, "shell", "pm uninstall com.android.tradefed.utils.wifi"] }); } catch { }
         await invoke("run_adb", { args: ["-s", dev, "install", "-r", "-g", "--bypass-low-target-sdk-block", apk] });
-        await delay(2000); 
+        await delay(2000);
         appendLog(`[${dev}] Mengirim profil WiFi...`);
 
         const addCmd = password
@@ -580,7 +580,7 @@ export default function App() {
     // Cek ulang apakah ada yang tiba-tiba busy di instance lain
     const busy: string[] = await invoke("get_busy_devices");
     const stillAvailable = downloadSelectedDevices.filter(id => !busy.includes(id));
-    
+
     if (stillAvailable.length === 0) {
       appendLog("✗ Gagal: Semua perangkat terpilih sedang sibuk di jendela lain.");
       setShowDownloadModal(false);
@@ -666,7 +666,7 @@ export default function App() {
               }
 
               appendLog("✓ Perangkat ADB terdeteksi! Menunggu stabilisasi sistem (10 detik)...");
-              await delay(10000); 
+              await delay(10000);
               await refreshDevices(true);
 
               // Refresh list device di layar (Retry logic: 30x)
@@ -678,7 +678,7 @@ export default function App() {
                   const currentAdb = await invoke<string[]>("get_devices");
                   // HANYA ambil perangkat yang memang kita kunci di awal (activeSelection)
                   const newlyBooted = currentAdb.filter(d => !preFlashAdb.includes(d) && activeSelection.includes(d));
-                  
+
                   if (newlyBooted.length > 0) {
                     setSelectedDevices(newlyBooted);
                     currentSelection = newlyBooted;
@@ -688,9 +688,9 @@ export default function App() {
                     break;
                   }
                 } catch (e) { }
-                
+
                 if (i < 29) {
-                  appendLog(`⏳ Perangkat belum terdeteksi sempurna (Percobaan ${i+1}/30). Mencoba lagi dalam 10 detik...`);
+                  appendLog(`⏳ Perangkat belum terdeteksi sempurna (Percobaan ${i + 1}/30). Mencoba lagi dalam 10 detik...`);
                   await delay(10000);
                 }
               }
@@ -821,9 +821,9 @@ export default function App() {
 
         {/* ── ERROR MODAL (Industrial Style) ── */}
         {showErrorModal && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-8">
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 sm:p-8">
             <div className="w-full max-w-md bg-[#1a1a1a] border border-red-500/50 shadow-[0_0_50px_rgba(239,68,68,0.2)] relative">
-              <div className="flex items-center justify-between p-6 border-b border-white/5 bg-red-500/5">
+              <div className="flex items-center justify-between p-4 sm:p-6 border-b border-white/5 bg-red-500/5">
                 <div className="flex items-center gap-3">
                   <AlertTriangle className="w-5 h-5 text-red-500" />
                   <span className="text-[12px] font-black uppercase tracking-widest text-red-500">Device Data Error</span>
@@ -832,7 +832,7 @@ export default function App() {
                   <X className="w-4 h-4 text-white/40" />
                 </button>
               </div>
-              <div className="p-8 space-y-6">
+              <div className="p-4 sm:p-8 space-y-4 sm:space-y-6">
                 <p className="text-[14px] leading-relaxed text-white/80">
                   Gagal mengambil data properti dari perangkat <span className="font-mono text-red-400">[{failedDevice}]</span>.
                 </p>
@@ -859,7 +859,7 @@ export default function App() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <div className="bg-[#1a1a1a] border border-orange-500/50 rounded-2xl w-full max-w-md overflow-hidden shadow-[0_0_50px_rgba(249,115,22,0.15)] relative">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-600 to-yellow-500"></div>
-              <div className="p-8">
+              <div className="p-4 sm:p-8">
                 <div className="flex items-center gap-4 mb-6">
                   <div className="w-12 h-12 rounded-full bg-orange-500/10 flex items-center justify-center shrink-0 border border-orange-500/20">
                     <AlertTriangle className="w-6 h-6 text-orange-400" />
@@ -906,8 +906,8 @@ export default function App() {
         {/* ── DOWNLOAD MODE MODAL ── */}
         {showDownloadModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-            <div className="bg-[#111] border border-[#333] rounded-3xl p-8 max-w-2xl w-full shadow-2xl relative">
-              <div className="absolute top-6 right-6 flex items-center gap-4">
+            <div className="bg-[#111] border border-[#333] rounded-2xl sm:rounded-3xl p-4 sm:p-8 max-w-2xl w-full shadow-2xl relative">
+              <div className="absolute top-4 sm:top-6 right-4 sm:right-6 flex items-center gap-4">
                 <button
                   onClick={() => refreshDevices()}
                   title="Refresh Daftar Perangkat"
@@ -944,7 +944,7 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="flex flex-col gap-4 mb-10 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
+              <div className="flex flex-col gap-4 mb-10 max-h-[40vh] overflow-y-auto custom-scrollbar pr-2">
                 {loading && devices.length === 0 ? (
                   <div className="flex flex-col items-center justify-center p-8 gap-4 border border-white/5 rounded-2xl bg-white/[0.02]">
                     <RefreshCw className="w-8 h-8 animate-spin text-blue-500" />
@@ -1005,7 +1005,7 @@ export default function App() {
             <button
               id="tab-provisioning"
               onClick={() => setActiveTab("provisioning")}
-              className={`h-full px-6 md:px-12 text-[11px] md:text-[13px] font-black uppercase tracking-[0.1em] md:tracking-[0.2em] border-b-[3px] transition-all ${activeTab === "provisioning"
+              className={`h-full px-3 sm:px-6 md:px-12 text-[10px] sm:text-[11px] md:text-[13px] font-black uppercase tracking-[0.05em] sm:tracking-[0.1em] md:tracking-[0.2em] border-b-[3px] transition-all ${activeTab === "provisioning"
                 ? "border-white text-white bg-white/[0.02]"
                 : "border-transparent text-white/30 hover:text-white/60 hover:bg-white/[0.01]"
                 }`}
@@ -1015,13 +1015,13 @@ export default function App() {
             <button
               id="tab-odin"
               onClick={() => setActiveTab("odin")}
-              className={`h-full px-6 md:px-12 text-[11px] md:text-[13px] font-black uppercase tracking-[0.1em] md:tracking-[0.2em] border-b-[3px] transition-all relative overflow-hidden ${activeTab === "odin"
+              className={`h-full px-3 sm:px-6 md:px-12 text-[10px] sm:text-[11px] md:text-[13px] font-black uppercase tracking-[0.05em] sm:tracking-[0.1em] md:tracking-[0.2em] border-b-[3px] transition-all relative overflow-hidden ${activeTab === "odin"
                 ? "border-blue-500 text-blue-400 bg-blue-500/[0.02]"
                 : "border-transparent text-white/30 hover:text-white/60 hover:bg-white/[0.01]"
                 }`}
             >
               {currentVerifyProgress > 0 && currentVerifyProgress < 100 && (
-                <div 
+                <div
                   className="absolute bottom-0 left-0 h-full bg-blue-500/30 shadow-[0_0_24px_rgba(59,130,246,0.35)] transition-all duration-300 pointer-events-none"
                   style={{ width: `${currentVerifyProgress}%` }}
                 />
@@ -1034,8 +1034,8 @@ export default function App() {
         {/* Always mount OdinFlash to retain state and refs, but hide it if not active */}
         <div className={activeTab === "odin" ? "flex-1 flex flex-col min-h-0 p-3 md:p-8" : "hidden"}>
           <div className="flex-1 flex flex-col bg-[#121212] border border-[#222] rounded-xl md:rounded-3xl p-3 md:p-8 overflow-hidden shadow-inner">
-            <OdinFlash 
-              ref={odinRef} 
+            <OdinFlash
+              ref={odinRef}
               allSerials={devices}
               selectedSerials={selectedDevices}
               setSelectedSerials={setSelectedDevices}
@@ -1046,7 +1046,7 @@ export default function App() {
         </div>
 
         <main className={activeTab === "provisioning" ? "flex-1 flex min-h-0 p-3 md:p-8 overflow-hidden" : "hidden"}>
-          <div className="flex-1 flex flex-col md:flex-row bg-[#121212] border border-[#222] rounded-xl md:rounded-3xl p-4 md:p-8 gap-4 overflow-y-auto md:overflow-hidden shadow-inner custom-scrollbar">
+          <div className="flex-1 flex flex-col md:flex-row bg-[#121212] border border-[#222] rounded-xl md:rounded-3xl p-4 md:p-8 gap-4 overflow-y-auto shadow-inner custom-scrollbar">
             {/* Left: Device Pool */}
             <div className="w-full md:w-1/3 md:min-w-[350px] md:max-w-[500px] flex flex-col gap-4 md:gap-8 shrink-0 min-h-[300px] md:min-h-0">
               <div className="flex flex-col gap-3">
@@ -1086,26 +1086,26 @@ export default function App() {
                         key={id}
                         onClick={() => !busyDevices.includes(id) && toggleDevice(id)}
                         className={`h-[76px] shrink-0 p-4 rounded-xl border transition-all cursor-pointer relative overflow-hidden ${
-                          busyDevices.includes(id) 
-                            ? 'opacity-50 grayscale cursor-not-allowed border-white/5 bg-white/5' 
-                            : selectedDevices.includes(id) 
-                              ? isFlashing 
-                                ? 'border-blue-500 bg-blue-500/10 shadow-[0_0_15px_rgba(59,130,246,0.3)]' 
-                                : isPass 
+                          busyDevices.includes(id) && !selectedDevices.includes(id)
+                            ? 'opacity-50 grayscale cursor-not-allowed border-white/5 bg-white/5'
+                            : selectedDevices.includes(id)
+                              ? isFlashing
+                                ? 'border-blue-500 bg-blue-500/10 shadow-[0_0_15px_rgba(59,130,246,0.3)]'
+                                : isPass
                                   ? 'border-green-500 bg-green-500/10 shadow-[0_0_15px_rgba(34,197,94,0.3)]'
                                   : isFail
                                     ? 'border-red-500 bg-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.3)]'
-                                    : 'border-white shadow-[0_0_15px_rgba(255,255,255,0.25)]' 
+                                    : 'border-white shadow-[0_0_15px_rgba(255,255,255,0.25)]'
                               : isFlashing
                                 ? 'border-blue-500/30'
                                 : 'border-[#222] hover:border-white/10'
-                        }`}
+                          }`}
                       >
                         {/* Progress Bar Background */}
                         {isFlashing && odinData && (
-                          <div 
-                            className="absolute inset-y-0 left-0 bg-blue-500/25 shadow-[0_0_35px_rgba(59,130,246,0.25)] transition-all duration-300 z-0" 
-                            style={{ width: `${odinData.progress}%` }} 
+                          <div
+                            className="absolute inset-y-0 left-0 bg-blue-500/25 shadow-[0_0_35px_rgba(59,130,246,0.25)] transition-all duration-300 z-0"
+                            style={{ width: `${odinData.progress}%` }}
                           />
                         )}
                         {isPass && (
@@ -1125,7 +1125,7 @@ export default function App() {
                             boxShadow: '0 0 10px rgba(220,38,38,0.5)'
                           }}>BUSY</div>
                         )}
-                        
+
                         <div className="relative z-10 h-full flex flex-col justify-center">
                           <div className="flex items-center justify-between">
                             <div className="flex flex-col min-w-0">
@@ -1134,12 +1134,11 @@ export default function App() {
                                   {item.model || id}
                                 </span>
                                 {isOdinMode && (
-                                  <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                                    isFlashing ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30 animate-pulse' :
-                                    isPass ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
-                                    isFail ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                                    'bg-blue-500/10 text-blue-400/80 border border-blue-500/20'
-                                  }`}>
+                                  <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded ${isFlashing ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30 animate-pulse' :
+                                      isPass ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                                        isFail ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                                          'bg-blue-500/10 text-blue-400/80 border border-blue-500/20'
+                                    }`}>
                                     {isFlashing ? `Flashing ${odinData?.progress}%` : odinData?.status || "Odin Mode"}
                                   </span>
                                 )}
@@ -1273,13 +1272,13 @@ export default function App() {
             {/* Emergency Stop Button */}
             <button
               onClick={handleEmergencyStop}
-              className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all border shadow-lg ${isStopping
+              className={`w-10 h-10 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all border shadow-lg ${isStopping
                 ? "bg-red-600 border-red-400 shadow-[0_0_30px_rgba(239,68,68,0.8)] animate-glow-red"
                 : (loading ? "bg-red-900/40 border-red-600/50 text-red-500 animate-pulse" : "bg-red-900/30 hover:bg-red-900/50 border-red-900/50 text-red-500/50 hover:text-red-500")
                 }`}
               title="EMERGENCY STOP (Cancel All Processes)"
             >
-              <ShieldAlert className="w-7 h-7" />
+              <ShieldAlert className="w-5 h-5 md:w-7 md:h-7" />
             </button>
 
             {/* Download Mode Button */}
@@ -1299,7 +1298,7 @@ export default function App() {
                   setLoading(false);
                 }
               }}
-              className="w-12 h-12 md:w-14 md:h-14 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-[0_0_30px_rgba(37,99,235,0.5)] flex items-center justify-center transition-transform hover:scale-110 active:scale-95 border border-blue-400"
+              className="w-10 h-10 md:w-14 md:h-14 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-[0_0_30px_rgba(37,99,235,0.5)] flex items-center justify-center transition-transform hover:scale-110 active:scale-95 border border-blue-400"
               title="Force Download Mode"
             >
               <Download className="w-5 h-5 md:w-6 md:h-6" />
