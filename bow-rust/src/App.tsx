@@ -594,15 +594,16 @@ export default function App() {
     try {
       appendLog(`Memaksa ${stillAvailable.length} perangkat ke Download Mode...`);
 
-      for (const dev of stillAvailable) {
-        if (stopRequested.current) break;
+      // ponytail: run adb reboot download commands in parallel
+      await Promise.all(stillAvailable.map(async (dev) => {
+        if (stopRequested.current) return;
         try {
           await invoke("run_adb", { args: ["-s", dev, "reboot", "download"] });
           appendLog(`[${dev}] ✓ Perintah Reboot Download Mode dikirim`);
         } catch (e: any) {
           appendLog(`[${dev}] ✗ Gagal: ${e}`);
         }
-      }
+      }));
     } finally {
       // Clear busy
       try { await invoke("clear_busy", { serials: stillAvailable }); } catch { }

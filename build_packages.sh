@@ -44,6 +44,17 @@ if [[ "$OS_TYPE" == "Linux" ]]; then
   elif [[ "$LINUX_FAMILY" == "deb" ]]; then
     echo "Detected Debian/Ubuntu Linux - Building DEB"
     BUNDLES="deb"
+
+    # ponytail: install tauri system dependencies if missing on new ubuntu/debian
+    DEPS=(build-essential pkg-config libudev-dev libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev libssl-dev)
+    MISSING=()
+    for dep in "${DEPS[@]}"; do
+      dpkg -s "$dep" &>/dev/null || MISSING+=("$dep")
+    done
+    if [ ${#MISSING[@]} -ne 0 ]; then
+      echo "Missing system dependencies: ${MISSING[*]}"
+      sudo apt-get update && sudo apt-get install -y "${MISSING[@]}"
+    fi
   else
     echo "Detected Linux - Unknown distro family, building DEB and RPM"
     BUNDLES="deb,rpm"
