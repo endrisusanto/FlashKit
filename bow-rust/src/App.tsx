@@ -211,14 +211,16 @@ export default function App() {
 
   const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-  const waitForAdb = async (timeoutMs = 600000, preFlashDevices: string[] = []) => {
+  const waitForAdb = async (timeoutMs = 600000, expectedDevices: string[] = [], preFlashDevices: string[] = []) => {
     const startTime = Date.now();
     while (Date.now() - startTime < timeoutMs) {
       if (stopRequested.current) return false;
       try {
         const list: string[] = await invoke<string[]>("get_devices");
-        const newDevices = list.filter(d => !preFlashDevices.includes(d));
-        if (newDevices.length > 0) return true;
+        const readyDevices = expectedDevices.length > 0
+          ? list.filter(d => expectedDevices.includes(d))
+          : list.filter(d => !preFlashDevices.includes(d));
+        if (readyDevices.length > 0) return true;
       } catch (e) {
         console.error(e);
       }
@@ -660,7 +662,7 @@ export default function App() {
               appendLog("✓ Odin Flash Selesai.");
               appendLog("⏳ Menunggu perangkat reboot dan terdeteksi ADB (Maksimal 10 Menit)...");
 
-              const adbReady = await waitForAdb(600000, preFlashAdb);
+              const adbReady = await waitForAdb(600000, activeSelection, preFlashAdb);
               if (!adbReady) {
                 appendLog("✗ Timeout: Perangkat tidak terdeteksi oleh ADB setelah 10 menit.");
                 return;
@@ -677,8 +679,10 @@ export default function App() {
                 await refreshDevices(true);
                 try {
                   const currentAdb = await invoke<string[]>("get_devices");
-                  // HANYA ambil perangkat yang memang kita kunci di awal (activeSelection)
-                  const newlyBooted = currentAdb.filter(d => !preFlashAdb.includes(d) && activeSelection.includes(d));
+                  // Serial ADB bisa tetap sama setelah flash; cukup cocokkan perangkat yang dikunci.
+                  const newlyBooted = activeSelection.length > 0
+                    ? currentAdb.filter(d => activeSelection.includes(d))
+                    : currentAdb.filter(d => !preFlashAdb.includes(d));
 
                   if (newlyBooted.length > 0) {
                     setSelectedDevices(newlyBooted);
