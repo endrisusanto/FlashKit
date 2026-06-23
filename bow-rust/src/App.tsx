@@ -357,7 +357,7 @@ export default function App() {
   const getSelectedSamsungPorts = async (sourceList: string[]) => {
     if (sourceList.length === 0) return [];
 
-    const samsungPorts = await invoke<SamsungPortInfo[]>("get_samsung_ports_detailed");
+    const samsungPorts = await invoke<SamsungPortInfo[]>("get_samsung_ports_detailed").catch(() => []);
     const selected = new Set(sourceList);
     const selectedUsbPorts = new Set(
       sourceList
@@ -1116,17 +1116,6 @@ export default function App() {
                           <div className="absolute inset-0 bg-red-500/10 z-0" />
                         )}
 
-                        {busyDevices.includes(id) && (
-                          <div style={{
-                            position: 'absolute', top: 12, right: 12,
-                            background: '#dc2626', color: 'white',
-                            fontSize: '10px', fontWeight: 900, letterSpacing: '0.15em',
-                            padding: '2px 8px', borderRadius: '4px',
-                            textTransform: 'uppercase', zIndex: 10,
-                            boxShadow: '0 0 10px rgba(220,38,38,0.5)'
-                          }}>BUSY</div>
-                        )}
-
                         <div className="relative z-10 h-full flex flex-col justify-center">
                           <div className="flex items-center justify-between">
                             <div className="flex flex-col min-w-0">
@@ -1148,8 +1137,11 @@ export default function App() {
                                 {item.serial ? `SN: ${item.serial}` : 'SN: Unknown'} &bull; {item.port || 'Unknown Port'}
                               </span>
                             </div>
-                            <div className={`w-6 h-6 border flex items-center justify-center transition-all shrink-0 ${selectedDevices.includes(id) ? 'bg-white border-white' : 'border-white/10'}`}>
-                              {selectedDevices.includes(id) && <Check className="w-3.5 h-3.5 text-black font-black" />}
+                            <div className="flex items-center gap-2 shrink-0">
+                              {busyDevices.includes(id) && <span className="bg-red-600 px-2 py-0.5 rounded text-[10px] font-black tracking-[0.15em] text-white shadow-[0_0_10px_rgba(220,38,38,0.5)]">BUSY</span>}
+                              <div className={`w-6 h-6 border flex items-center justify-center transition-all ${selectedDevices.includes(id) ? 'bg-white border-white' : 'border-white/10'}`}>
+                                {selectedDevices.includes(id) && <Check className="w-3.5 h-3.5 text-black font-black" />}
+                              </div>
                             </div>
                           </div>
                         </div>

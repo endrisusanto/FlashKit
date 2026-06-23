@@ -487,7 +487,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     setIsFlashing(true);
 
     // Tandai device sebagai busy untuk instance FlashKit lain
-    const checkedSerials = checked.map(([dev]) => dev);
+    const checkedSerials = checked.flatMap(([dev, data]) => data.serial ? [dev, data.serial] : [dev]);
     try { await invoke("mark_busy", { serials: checkedSerials }); } catch { }
 
     let anyFail = false;
@@ -558,16 +558,6 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                   </svg>
                 </div>
                 <div className="dev-info-area">
-                  {busyDevices.includes(dev) && (
-                    <div style={{
-                      position: 'absolute', top: 12, right: 50,
-                      background: '#dc2626', color: 'white',
-                      fontSize: '10px', fontWeight: 900, letterSpacing: '0.15em',
-                      padding: '2px 8px', borderRadius: '4px',
-                      textTransform: 'uppercase', zIndex: 10,
-                      boxShadow: '0 0 10px rgba(220,38,38,0.5)'
-                    }}>BUSY</div>
-                  )}
                   <div
                     className="custom-check-wrapper"
                     onClick={(e) => {
@@ -596,7 +586,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                     </div>
                   </div>
                   <h3 className="dev-title">
-                    {data.model || "Device"}
+                    <span>{data.model || "Device"}{busyDevices.includes(dev) && <span style={{ marginLeft: 6, background: '#dc2626', color: 'white', fontSize: '10px', fontWeight: 900, letterSpacing: '0.15em', padding: '2px 8px', borderRadius: 4, textTransform: 'uppercase', boxShadow: '0 0 10px rgba(220,38,38,0.5)' }}>BUSY</span>}</span>
                     <span className={
                       data.status === "Pass" ? "dev-status-success" :
                       data.status === "Fail" ? "dev-status-fail" :
