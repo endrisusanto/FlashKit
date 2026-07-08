@@ -263,13 +263,7 @@ fn odin_list_devices_blocking(app: AppHandle) -> Result<Vec<String>, String> {
     Ok(devices)
 }
 
-#[tauri::command]
-async fn resolve_usb_path(dev: String) -> Result<String, String> {
-    run_blocking("Resolve USB path", move || {
-        Ok(resolve_usb_path_blocking(dev))
-    })
-    .await
-}
+
 
 #[tauri::command]
 async fn resolve_usb_paths(
@@ -762,37 +756,7 @@ fn find_adb() -> String {
     return "adb".to_string();
 }
 
-#[tauri::command]
-async fn get_adb_version() -> Result<String, String> {
-    run_blocking("ADB version", || Ok(get_adb_version_blocking())).await
-}
 
-fn get_adb_version_blocking() -> String {
-    let adb_path = find_adb();
-    let mut cmd = Command::new(&adb_path);
-    cmd.arg("version");
-
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-
-    let output = cmd.output();
-    match output {
-        Ok(out) => format!(
-            "Path: {}\n{}",
-            adb_path,
-            String::from_utf8_lossy(&out.stdout)
-        ),
-        Err(e) => format!("Error finding ADB: {}", e),
-    }
-}
-
-#[tauri::command]
-async fn get_app_dir() -> Result<String, String> {
-    run_blocking("App dir", || {
-        Ok(get_exe_dir().to_string_lossy().to_string())
-    })
-    .await
-}
 
 #[tauri::command]
 async fn get_devices() -> Result<Vec<String>, String> {
@@ -870,17 +834,10 @@ async fn get_samsung_ports() -> Result<Vec<String>, String> {
 }
 
 fn get_samsung_ports_blocking() -> Result<Vec<String>, String> {
-    let ports = serialport::available_ports().map_err(|e| e.to_string())?;
-    let mut samsung_ports = vec![];
-    for p in ports {
-        if let serialport::SerialPortType::UsbPort(info) = p.port_type {
-            if info.vid == 0x04e8 {
-                // Samsung VID
-                samsung_ports.push(p.port_name);
-            }
-        }
-    }
-    Ok(samsung_ports)
+    Ok(get_samsung_ports_detailed_blocking()?
+        .into_iter()
+        .map(|p| p.port_name)
+        .collect())
 }
 
 fn tty_usb_path(port_name: &str) -> String {
@@ -930,17 +887,7 @@ fn get_samsung_ports_detailed_blocking() -> Result<Vec<SamsungPortInfo>, String>
     Ok(samsung_ports)
 }
 
-#[tauri::command]
-async fn get_serial_ports() -> Result<Vec<String>, String> {
-    run_blocking("Serial port scan", || Ok(get_serial_ports_blocking())).await
-}
 
-fn get_serial_ports_blocking() -> Vec<String> {
-    match serialport::available_ports() {
-        Ok(ports) => ports.into_iter().map(|p| p.port_name).collect(),
-        Err(_) => vec![],
-    }
-}
 
 #[tauri::command]
 async fn send_at_command(port_name: String, command: String) -> Result<String, String> {
@@ -1143,12 +1090,8 @@ pub fn run() {
             // ADB / Provisioning commands
             get_devices,
             run_adb,
-            get_adb_version,
-            get_app_dir,
-            get_serial_ports,
             get_samsung_ports,
             get_samsung_ports_detailed,
-            resolve_usb_path,
             resolve_usb_paths,
             get_adb_devices_advanced,
             send_at_command,

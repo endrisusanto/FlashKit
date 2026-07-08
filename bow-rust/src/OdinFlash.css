@@ -495,6 +495,31 @@
   animation: pulse-skeleton 1.5s infinite ease-in-out;
 }
 
+.file-clear-button {
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #ff453a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 3;
+  flex: 0 0 34px;
+}
+
+.file-clear-button:hover:not(:disabled) {
+  background: rgba(255, 69, 58, 0.12);
+}
+
+.file-clear-button:disabled {
+  color: #636366;
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 /* Action Section */
 .action-section {
   display: flex;

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, forwardRef, useImperativeHandle, useMemo }
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ShieldAlert, RefreshCw, DatabaseZap } from "lucide-react";
+import { ShieldAlert, RefreshCw, DatabaseZap, Trash2 } from "lucide-react";
 import "./OdinFlash.css";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -309,7 +309,6 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
 
     return () => unlisteners.forEach(fn => fn());
   }, [Object.keys(devices).join(",")]);
-
   // Listen to IPC shared progress from other instances
   useEffect(() => {
     const unlisten = listen<{ device: string; line: string }>("flash-progress-ipc", (event) => {
@@ -364,7 +363,6 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       unlisten.then(fn => fn());
     };
   }, []);
-
   // ── File selection & verification ────────────────────────────────────
 
   async function selectFile(slot: SlotKey) {
@@ -454,6 +452,11 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       csc: { text: "", progress: 0, verifying: false },
       userdata: { text: "", progress: 0, verifying: false },
     });
+  }
+
+  function clearFile(slot: SlotKey) {
+    setFilePaths(prev => ({ ...prev, [slot]: "" }));
+    setVerifyState(prev => ({ ...prev, [slot]: { text: "", progress: 0, verifying: false } }));
   }
 
   // ── Drag-drop for firmware files ─────────────────────────────────────
@@ -632,6 +635,18 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                       value={vs.text || (hasFile ? filePaths[slot].split(/[/\\]/).pop() : "")}
                       className={vs.verifying ? "verifying" : ""}
                     />
+                    <button
+                      type="button"
+                      className="file-clear-button"
+                      title={`Clear ${SLOT_LABELS[slot]}`}
+                      disabled={vs.verifying || (!hasFile && !vs.text)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        clearFile(slot);
+                      }}
+                    >
+                      <Trash2 width={16} height={16} />
+                    </button>
                     <div className="file-progress" style={{ width: `${vs.progress}%`, opacity: vs.verifying ? 1 : 0 }}></div>
                   </div>
                 </div>
