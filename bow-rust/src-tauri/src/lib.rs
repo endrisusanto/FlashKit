@@ -51,6 +51,18 @@ fn get_odin_binary(app: &AppHandle) -> String {
     }
 }
 
+fn extract_percentage(line: &str) -> Option<u32> {
+    if let Some(start) = line.rfind('(') {
+        if let Some(end) = line[start..].find("%)") {
+            let num_str = &line[start + 1..start + end];
+            if let Ok(pct) = num_str.parse::<u32>() {
+                return Some(pct);
+            }
+        }
+    }
+    None
+}
+
 fn drain_pipe<R>(mut reader: R) -> thread::JoinHandle<String>
 where
     R: Read + Send + 'static,
@@ -494,6 +506,7 @@ fn odin_flash_device_blocking(
     let device_id = params.device.clone();
     let mut buffer = Vec::new();
     let mut byte_buf = [0u8; 1];
+    let mut last_pct = None;
 
     // Broadcast start of flash
     broadcast_progress(&device_id, "=====================\nSTARTING ODIN ENGINE\n=====================");
@@ -503,8 +516,16 @@ fn odin_flash_device_blocking(
         if b == b'\n' || b == b'\r' {
             if !buffer.is_empty() {
                 let line = String::from_utf8_lossy(&buffer).to_string();
-                let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
-                broadcast_progress(&device_id, &line);
+                if let Some(pct) = extract_percentage(&line) {
+                    if Some(pct) != last_pct {
+                        last_pct = Some(pct);
+                        let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
+                        broadcast_progress(&device_id, &line);
+                    }
+                } else {
+                    let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
+                    broadcast_progress(&device_id, &line);
+                }
                 buffer.clear();
             }
         } else {
@@ -514,8 +535,15 @@ fn odin_flash_device_blocking(
 
     if !buffer.is_empty() {
         let line = String::from_utf8_lossy(&buffer).to_string();
-        let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
-        broadcast_progress(&device_id, &line);
+        if let Some(pct) = extract_percentage(&line) {
+            if Some(pct) != last_pct {
+                let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
+                broadcast_progress(&device_id, &line);
+            }
+        } else {
+            let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
+            broadcast_progress(&device_id, &line);
+        }
     }
 
     let status = child.wait().map_err(|e| e.to_string())?;
@@ -574,6 +602,7 @@ fn odin_check_file_blocking(
     if let Some(stdout) = child.stdout.take() {
         let mut reader = BufReader::new(stdout);
         let mut buffer = Vec::new();
+        let mut last_pct = None;
 
         // Read byte by byte to handle both \n and \r (odin4 uses \r for progress)
         let mut byte_buf = [0u8; 1];
@@ -582,7 +611,14 @@ fn odin_check_file_blocking(
             if b == b'\n' || b == b'\r' {
                 if !buffer.is_empty() {
                     let line = String::from_utf8_lossy(&buffer).to_string();
-                    let _ = window.emit(&format!("md5-progress-{}", slot), line);
+                    if let Some(pct) = extract_percentage(&line) {
+                        if Some(pct) != last_pct {
+                            last_pct = Some(pct);
+                            let _ = window.emit(&format!("md5-progress-{}", slot), line);
+                        }
+                    } else {
+                        let _ = window.emit(&format!("md5-progress-{}", slot), line);
+                    }
                     buffer.clear();
                 }
             } else {
@@ -592,7 +628,13 @@ fn odin_check_file_blocking(
 
         if !buffer.is_empty() {
             let line = String::from_utf8_lossy(&buffer).to_string();
-            let _ = window.emit(&format!("md5-progress-{}", slot), line);
+            if let Some(pct) = extract_percentage(&line) {
+                if Some(pct) != last_pct {
+                    let _ = window.emit(&format!("md5-progress-{}", slot), line);
+                }
+            } else {
+                let _ = window.emit(&format!("md5-progress-{}", slot), line);
+            }
         }
     }
 
