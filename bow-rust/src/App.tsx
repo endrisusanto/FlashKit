@@ -797,7 +797,17 @@ export default function App() {
       }
     });
 
-    return list;
+    // Sort so that devices with Odin status "Ready" are pinned to the top
+    return list.sort((a, b) => {
+      const aOdinData = a.odinKey ? odinDeviceStates[a.odinKey] : undefined;
+      const bOdinData = b.odinKey ? odinDeviceStates[b.odinKey] : undefined;
+      const aReady = aOdinData?.status === "Ready";
+      const bReady = bOdinData?.status === "Ready";
+
+      if (aReady && !bReady) return -1;
+      if (!aReady && bReady) return 1;
+      return 0;
+    });
   }, [devices, deviceDetails, odinDeviceStates]);
 
   const selectAll = () => {
