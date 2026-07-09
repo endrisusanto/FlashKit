@@ -80,10 +80,12 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   const devicesRef = useRef(devices);
   const isFlashingRef = useRef(isFlashing);
   const selectedSerialsRef = useRef(selectedSerials);
+  const allSerialsRef = useRef(allSerials);
   const scanInFlightRef = useRef(false);
   devicesRef.current = devices;
   isFlashingRef.current = isFlashing;
   selectedSerialsRef.current = selectedSerials;
+  allSerialsRef.current = allSerials;
 
   useImperativeHandle(ref, () => ({
     startFlash: async () => {
@@ -170,6 +172,20 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       
       setDevices(prev => {
         const updated = { ...prev };
+
+        // Clean up disconnected devices
+        for (const key of Object.keys(updated)) {
+          const isCurrentOdin = list.includes(key);
+          const serial = updated[key].serial;
+          const isCurrentAdb = serial ? allSerialsRef.current?.includes(serial) : false;
+
+          if (!isCurrentOdin && !isCurrentAdb) {
+            if (updated[key].status !== "Flashing...") {
+              delete updated[key];
+            }
+          }
+        }
+
         for (const dev of list) {
           if (!updated[dev]) {
             const port = resolvedPorts[dev];
@@ -215,6 +231,11 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     const interval = setInterval(scanDevices, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  // Run scanDevices immediately when connected ADB serials change to keep Odin list in sync
+  useEffect(() => {
+    scanDevices();
+  }, [allSerials]);
 
   // Sync with App.tsx checked state
   useEffect(() => {
