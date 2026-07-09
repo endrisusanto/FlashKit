@@ -80,6 +80,8 @@ export default function App() {
   const [busyDevices, setBusyDevices] = useState<string[]>([]);
   const [odinDeviceStates, setOdinDeviceStates] = useState<Record<string, DeviceData>>({});
   const [currentVerifyProgress, setCurrentVerifyProgress] = useState(0);
+  const [isVerifyingMd5, setIsVerifyingMd5] = useState(false);
+  const [verifyMd5Progress, setVerifyMd5Progress] = useState(0);
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -797,16 +799,24 @@ export default function App() {
       }
     });
 
-    // Sort so that devices with Odin status "Ready" are pinned to the top
+    // Sort: 1. Ready, 2. Flashing..., 3. Others (stable fallback using id)
     return list.sort((a, b) => {
-      const aOdinData = a.odinKey ? odinDeviceStates[a.odinKey] : undefined;
-      const bOdinData = b.odinKey ? odinDeviceStates[b.odinKey] : undefined;
-      const aReady = aOdinData?.status === "Ready";
-      const bReady = bOdinData?.status === "Ready";
+      const getWeight = (item: typeof a) => {
+        const odinData = item.odinKey ? odinDeviceStates[item.odinKey] : undefined;
+        if (odinData) {
+          if (odinData.status === "Ready") return 3;
+          if (odinData.status === "Flashing..." || odinData.status === "Pass") return 2;
+        }
+        return 1;
+      };
 
-      if (aReady && !bReady) return -1;
-      if (!aReady && bReady) return 1;
-      return 0;
+      const wA = getWeight(a);
+      const wB = getWeight(b);
+
+      if (wA !== wB) {
+        return wB - wA;
+      }
+      return a.id.localeCompare(b.id);
     });
   }, [devices, deviceDetails, odinDeviceStates]);
 
@@ -1056,6 +1066,10 @@ export default function App() {
               setSelectedSerials={setSelectedDevices}
               onDevicesUpdate={setOdinDeviceStates}
               onVerifyProgress={setCurrentVerifyProgress}
+              onVerifyStateChange={(verifying, progress) => {
+                setIsVerifyingMd5(verifying);
+                setVerifyMd5Progress(progress);
+              }}
             />
           </div>
         </div>
@@ -1232,9 +1246,38 @@ export default function App() {
                       <span className={`text-[9px] md:text-[11px] font-black uppercase tracking-widest text-center ${seqWifi ? 'text-green-400' : 'text-white/40'}`}>WiFi Connect</span>
                     </div>
                   </div>
-                  <button onClick={() => runMasterSequence()} disabled={loading || (!seqOdin && !seqSkipWz && !seqGba && !seqWifi)} className={`w-full mt-2 py-4 md:py-6 rounded-xl transition-all font-black uppercase tracking-widest text-[14px] md:text-[16px] flex items-center justify-center gap-3 md:gap-4 border-2 ${loading ? 'bg-[#111] border-[#333] text-white/40 cursor-not-allowed' : 'bg-white text-black border-white hover:bg-gray-200 disabled:opacity-30'}`}>
-                    {loading && currentStep !== null ? <RefreshCw className="w-5 md:w-6 h-5 md:h-6 animate-spin" /> : <Play className="w-5 md:w-6 h-5 md:h-6" />}
-                    <span>{loading && currentStep !== null ? 'Memproses...' : 'Jalankan Automasi'}</span>
+                  <button
+                    onClick={() => runMasterSequence()}
+                    disabled={loading || (seqOdin && isVerifyingMd5) || (!seqOdin && !seqSkipWz && !seqGba && !seqWifi)}
+                    className={`w-full mt-2 py-4 md:py-6 rounded-xl transition-all font-black uppercase tracking-widest text-[14px] md:text-[16px] flex items-center justify-center gap-3 md:gap-4 border-2 ${
+                      seqOdin && isVerifyingMd5
+                        ? 'border-blue-500/50 bg-[#111] text-white/80 cursor-not-allowed'
+                        : loading
+                        ? 'bg-[#111] border-[#333] text-white/40 cursor-not-allowed'
+                        : 'bg-white text-black border-white hover:bg-gray-200 disabled:opacity-30'
+                    }`}
+                    style={
+                      seqOdin && isVerifyingMd5
+                        ? {
+                            background: `linear-gradient(to right, rgba(59, 130, 246, 0.25) ${verifyMd5Progress}%, transparent ${verifyMd5Progress}%)`,
+                          }
+                        : undefined
+                    }
+                  >
+                    {seqOdin && isVerifyingMd5 ? (
+                      <RefreshCw className="w-5 md:w-6 h-5 md:h-6 animate-spin text-blue-500" />
+                    ) : loading && currentStep !== null ? (
+                      <RefreshCw className="w-5 md:w-6 h-5 md:h-6 animate-spin" />
+                    ) : (
+                      <Play className="w-5 md:w-6 h-5 md:h-6" />
+                    )}
+                    <span>
+                      {seqOdin && isVerifyingMd5
+                        ? `Verifying MD5 . . . ${Math.round(verifyMd5Progress)}%`
+                        : loading && currentStep !== null
+                        ? 'Memproses...'
+                        : 'Jalankan Automasi'}
+                    </span>
                   </button>
                 </div>
                 {loading && currentStep !== null && <div className="absolute bottom-0 left-0 h-1 bg-blue-500 w-full animate-pulse"></div>}

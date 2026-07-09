@@ -1,6 +1,6 @@
 [package]
 name = "flashkit"
-version = "1.8.32"
+version = "1.8.33"
 description = "FlashKit - Device Provisioning Tool"
 authors = ["you"]
 edition = "2021"

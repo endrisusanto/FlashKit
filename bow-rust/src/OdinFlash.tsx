@@ -60,9 +60,10 @@ export interface OdinFlashProps {
   setSelectedSerials?: React.Dispatch<React.SetStateAction<string[]>>;
   onDevicesUpdate?: (devices: Record<string, DeviceData>) => void;
   onVerifyProgress?: (progress: number) => void;
+  onVerifyStateChange?: (verifying: boolean, progress: number) => void;
 }
 
-const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, selectedSerials, setSelectedSerials, onDevicesUpdate, onVerifyProgress }, ref) => {
+const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, selectedSerials, setSelectedSerials, onDevicesUpdate, onVerifyProgress, onVerifyStateChange }, ref) => {
   const [filePaths, setFilePaths] = useState<FilePaths>({ bl: "", ap: "", cp: "", csc: "", userdata: "" });
   const [verifyState, setVerifyState] = useState<Record<SlotKey, { text: string; progress: number; verifying: boolean }>>({
     bl: { text: "", progress: 0, verifying: false },
@@ -115,6 +116,16 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   useEffect(() => {
     if (onVerifyProgress) onVerifyProgress(overallFlashProgress > 0 ? overallFlashProgress : overallVerifyProgress);
   }, [overallFlashProgress, overallVerifyProgress, onVerifyProgress]);
+
+  const isVerifyingAnyFile = useMemo(() => {
+    return Object.values(verifyState).some(s => s.verifying);
+  }, [verifyState]);
+
+  useEffect(() => {
+    if (onVerifyStateChange) {
+      onVerifyStateChange(isVerifyingAnyFile, overallVerifyProgress);
+    }
+  }, [isVerifyingAnyFile, overallVerifyProgress, onVerifyStateChange]);
 
   // ── Busy device polling (cross-instance) ──────────────────────────────
 
