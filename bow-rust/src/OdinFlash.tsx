@@ -187,8 +187,16 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
         }
 
         for (const dev of list) {
+          const port = resolvedPorts[dev];
+
+          // Delete any existing device in updated that has the same physical port but a different path
+          for (const [oldKey, oldData] of Object.entries(updated)) {
+            if (oldKey !== dev && oldData.port === port) {
+              delete updated[oldKey];
+            }
+          }
+
           if (!updated[dev]) {
-            const port = resolvedPorts[dev];
             let serial = undefined;
             let model = undefined;
             try {
