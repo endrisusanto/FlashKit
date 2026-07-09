@@ -540,16 +540,17 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
 
   const readyToFlashCount = Object.values(devices).filter(d => d.checked && d.status !== "Flashing...").length;
   const anyFlashing = Object.values(devices).some(d => d.status === "Flashing...");
+  const visibleDevices = Object.entries(devices).filter(([, d]) => d.status !== "Pass");
 
   return (
     <div className="odin-container">
       <div className="devices-section">
-        {Object.entries(devices).length === 0 ? (
+        {visibleDevices.length === 0 ? (
           <div className="device-skeleton">
             No devices currently in Odin state
           </div>
         ) : (
-          Object.entries(devices).map(([dev, data]) => (
+          visibleDevices.map(([dev, data]) => (
               <div key={dev} className={`device-card ${data.status === "Flashing..." ? "flashing-state" : ""}`}
               onClick={() => setLogModal({ device: dev, log: data.log })}
             >

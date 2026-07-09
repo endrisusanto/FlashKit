@@ -1143,7 +1143,7 @@ export default function App() {
                                         isFail ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
                                           'bg-blue-500/10 text-blue-400/80 border border-blue-500/20'
                                     }`}>
-                                    {isFlashing ? `Flashing ${odinData?.progress}%` : odinData?.status || "Odin Mode"}
+                                    {isFlashing ? `Flashing ${odinData?.progress}%` : isPass ? "Odin Completed" : odinData?.status || "Odin Mode"}
                                   </span>
                                 )}
                               </div>
