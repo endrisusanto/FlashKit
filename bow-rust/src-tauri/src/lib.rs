@@ -90,6 +90,19 @@ struct IpcProgressMessage {
 
 static IPC_SENDER: Mutex<Option<Sender<String>>> = Mutex::new(None);
 
+// ponytail: track active process IDs (PIDs) to kill only the current instance's processes during emergency stop instead of killing globally
+static ACTIVE_PIDS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+struct PidGuard(u32);
+
+impl Drop for PidGuard {
+    fn drop(&mut self) {
+        if let Ok(mut pids) = ACTIVE_PIDS.lock() {
+            pids.retain(|&x| x != self.0);
+        }
+    }
+}
+
 fn broadcast_progress(device_id: &str, line: &str) {
     let msg = IpcProgressMessage {
         device: device_id.to_string(),
@@ -499,6 +512,14 @@ fn odin_flash_device_blocking(
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
     let mut child = cmd.spawn().map_err(|e| format!("{}: {}", binary, e))?;
+    let pid = child.id();
+    {
+        if let Ok(mut pids) = ACTIVE_PIDS.lock() {
+            pids.push(pid);
+        }
+    }
+    let _guard = PidGuard(pid);
+
     let stdout = child.stdout.take().unwrap();
     let stderr_reader = child.stderr.take().map(drain_pipe);
     let mut reader = BufReader::new(stdout);
@@ -597,6 +618,14 @@ fn odin_check_file_blocking(
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
     let mut child = cmd.spawn().map_err(|e| format!("{}: {}", binary, e))?;
+    let pid = child.id();
+    {
+        if let Ok(mut pids) = ACTIVE_PIDS.lock() {
+            pids.push(pid);
+        }
+    }
+    let _guard = PidGuard(pid);
+
     let stderr_reader = child.stderr.take().map(drain_pipe);
 
     if let Some(stdout) = child.stdout.take() {
@@ -1084,23 +1113,26 @@ async fn emergency_stop() -> Result<(), String> {
 }
 
 fn emergency_stop_blocking() -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        // Kill odin4.exe and adb.exe on Windows
-        let _ = Command::new("taskkill")
-            .args(&["/F", "/IM", "odin4.exe", "/T"])
-            .creation_flags(0x08000000)
-            .output();
-        let _ = Command::new("taskkill")
-            .args(&["/F", "/IM", "adb.exe", "/T"])
-            .creation_flags(0x08000000)
-            .output();
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        // Kill odin4 and adb on Linux/macOS
-        let _ = Command::new("pkill").arg("-9").arg("odin4").output();
-        let _ = Command::new("pkill").arg("-9").arg("adb").output();
+    let pids = {
+        if let Ok(pids) = ACTIVE_PIDS.lock() {
+            pids.clone()
+        } else {
+            Vec::new()
+        }
+    };
+
+    for pid in pids {
+        #[cfg(target_os = "windows")]
+        {
+            let _ = Command::new("taskkill")
+                .args(&["/F", "/PID", &pid.to_string(), "/T"])
+                .creation_flags(0x08000000)
+                .output();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = Command::new("kill").args(&["-9", &pid.to_string()]).output();
+        }
     }
     Ok(())
 }
