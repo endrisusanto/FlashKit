@@ -32,7 +32,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     outputs:
       tag_name: ${{ steps.bump.outputs.tag_name }}
       version: ${{ steps.bump.outputs.version }}
@@ -65,7 +65,7 @@ jobs:
     if: always() && (github.event_name == 'push' || needs.bump-version.result == 'success')
     permissions:
       contents: write
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.create-release.outputs.id }}
     steps:
@@ -90,12 +90,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: windows-latest
-            runner: windows
-          - platform: ubuntu-22.04
-            runner: linux
-    runs-on: [self-hosted, "${{ matrix.runner }}", x64]
+        platform: [windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
         with:
