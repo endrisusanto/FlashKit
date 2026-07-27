@@ -111,11 +111,7 @@ export default function App() {
   const [isStopping, setIsStopping] = useState(false);
   const stopRequested = useRef(false);
   const lastDeviceCacheAt = useRef(0);
-  const loadingRef = useRef(false);
-
-  useEffect(() => {
-    loadingRef.current = loading;
-  }, [loading]);
+  const refreshInFlightRef = useRef(false);
 
   const appendLog = (msg: string) => {
     const time = new Date().toLocaleTimeString();
@@ -232,7 +228,8 @@ export default function App() {
   };
 
   const refreshDevices = async (silent = false) => {
-    if (loadingRef.current && silent) return;
+    if (refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
     setLoading(true);
     if (!silent) appendLog("Memindai port COM & Modem...");
     let samsungPortsCount = 0;
@@ -267,7 +264,7 @@ export default function App() {
       }
 
       setDeviceDetails(details);
-      await invoke("save_device_cache", {
+      const cache = await invoke<DeviceCache>("save_device_cache", {
         devices: advList.map((adv: any) => {
           const detail = details[adv.serial] || {};
           const { usb_port, _model, ...info } = detail;
@@ -279,7 +276,6 @@ export default function App() {
           };
         }),
       });
-      const cache: DeviceCache = await invoke("get_device_cache");
       lastDeviceCacheAt.current = cache.updated_at_ms;
       if (!silent) appendLog(`Ditemukan ${list.length} perangkat`);
 
@@ -292,6 +288,7 @@ export default function App() {
         appendLog("⚠ PERINGATAN: Beberapa perangkat gagal memberikan data prop.");
       }
     } catch (e: any) { if (!silent) appendLog(`ERROR: ${e}`); }
+    refreshInFlightRef.current = false;
     setLoading(false);
   };
 

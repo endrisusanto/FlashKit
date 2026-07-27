@@ -1091,11 +1091,15 @@ fn reset_device_cache() {
 }
 
 #[tauri::command]
-fn save_device_cache(devices: Vec<CachedAdbDevice>) {
+fn save_device_cache(devices: Vec<CachedAdbDevice>) -> DeviceCache {
     let mut state = read_busy_state();
     state.adb_devices = devices;
     state.updated_at_ms = now_ms();
     write_busy_state(&state);
+    DeviceCache {
+        devices: state.adb_devices,
+        updated_at_ms: state.updated_at_ms,
+    }
 }
 
 #[tauri::command]

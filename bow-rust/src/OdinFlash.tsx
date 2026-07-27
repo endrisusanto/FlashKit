@@ -230,7 +230,6 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   }
 
   async function forceRefresh() {
-    setDevices({});
     await scanDevices();
   }
 

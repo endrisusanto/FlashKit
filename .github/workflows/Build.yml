@@ -1,0 +1,21 @@
+name: Build Windows x64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: [self-hosted, windows, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release
+        shell: pwsh
+        run: ./release.ps1 -Bundles msi
+
+      - name: Upload MSI installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlashKit-windows-x64
+          path: bow-rust/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
