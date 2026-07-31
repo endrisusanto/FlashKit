@@ -403,11 +403,81 @@
 
 .file-row {
   display: flex;
-  align-items: stretch;
-  gap: 12px;
+  align-items: center;
+  gap: 14px;
   width: 100%;
   flex: 1;
   min-height: 48px;
+  padding: 6px 14px;
+  border-radius: 12px;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+/* Distinct card backgrounds & accents for each firmware slot */
+.file-row-bl {
+  background: rgba(245, 158, 11, 0.07);
+  border: 1px solid rgba(245, 158, 11, 0.20);
+}
+.file-row-bl:hover {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.38);
+  box-shadow: 0 0 15px rgba(245, 158, 11, 0.12);
+}
+.file-row-bl .file-label {
+  color: #f59e0b;
+}
+
+.file-row-ap {
+  background: rgba(59, 130, 246, 0.07);
+  border: 1px solid rgba(59, 130, 246, 0.20);
+}
+.file-row-ap:hover {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.38);
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.12);
+}
+.file-row-ap .file-label {
+  color: #60a5fa;
+}
+
+.file-row-cp {
+  background: rgba(168, 85, 247, 0.07);
+  border: 1px solid rgba(168, 85, 247, 0.20);
+}
+.file-row-cp:hover {
+  background: rgba(168, 85, 247, 0.12);
+  border-color: rgba(168, 85, 247, 0.38);
+  box-shadow: 0 0 15px rgba(168, 85, 247, 0.12);
+}
+.file-row-cp .file-label {
+  color: #c084fc;
+}
+
+.file-row-csc {
+  background: rgba(16, 185, 129, 0.07);
+  border: 1px solid rgba(16, 185, 129, 0.20);
+}
+.file-row-csc:hover {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.38);
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.12);
+}
+.file-row-csc .file-label {
+  color: #34d399;
+}
+
+.file-row-userdata {
+  background: rgba(244, 63, 94, 0.07);
+  border: 1px solid rgba(244, 63, 94, 0.20);
+}
+.file-row-userdata:hover {
+  background: rgba(244, 63, 94, 0.12);
+  border-color: rgba(244, 63, 94, 0.38);
+  box-shadow: 0 0 15px rgba(244, 63, 94, 0.12);
+}
+.file-row-userdata .file-label {
+  color: #fb7185;
 }
 
 .file-label {
@@ -426,21 +496,23 @@
 
 .file-label span {
   font-size: clamp(14px, 2.2vh, 20px);
-  font-weight: 500;
-  color: var(--text-main);
+  font-weight: 600;
+  color: inherit;
 }
 
 .file-input-wrapper {
-  background: var(--bg-input);
-  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
   flex: 1;
   display: flex;
   align-items: center;
   padding: 0 12px;
   cursor: pointer;
-  transition: background 0.2s, opacity 0.2s;
+  transition: background 0.2s, border-color 0.2s, opacity 0.2s;
   position: relative;
   overflow: hidden;
+  height: 100%;
 }
 
 .file-progress {
@@ -457,7 +529,8 @@
 }
 
 .file-input-wrapper:hover {
-  background: #3a3a3c;
+  background: rgba(0, 0, 0, 0.55);
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
 .file-input-wrapper.flashing-disabled {

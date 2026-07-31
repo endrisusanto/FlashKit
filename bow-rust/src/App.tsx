@@ -1329,18 +1329,18 @@ export default function App() {
                   </button>
 
                   {/* AP / ALL Firmware Filename Badge */}
-                  <div className="flex items-center justify-center mt-3">
+                  <div className="flex items-center justify-center mt-1.5">
                     <div
-                      className={`px-3.5 py-1.5 rounded-lg border text-[11px] font-mono flex items-center gap-2 max-w-full overflow-hidden transition-all shadow-sm ${
+                      className={`px-2 py-0.5 rounded-md border text-[10px] font-mono flex items-center gap-1.5 max-w-full overflow-hidden transition-all ${
                         apFileName
-                          ? 'border-orange-500/40 bg-orange-500/10 text-orange-300 shadow-[0_0_10px_rgba(249,115,22,0.15)]'
-                          : 'border-white/10 bg-white/5 text-white/30'
+                          ? 'border-white/15 bg-white/10 text-white/70'
+                          : 'border-white/5 bg-white/5 text-white/25'
                       }`}
                       title={apFileName ? `File AP/ALL: ${apFileName}` : "Belum ada file AP/ALL yang dipilih pada tab Firmware"}
                     >
-                      <FileText className={`w-3.5 h-3.5 shrink-0 ${apFileName ? 'text-orange-400 animate-pulse' : 'text-white/20'}`} />
+                      <FileText className={`w-3 h-3 shrink-0 ${apFileName ? 'text-white/50' : 'text-white/20'}`} />
                       <span className="truncate">
-                        {apFileName ? `AP/ALL: ${apFileName}` : 'AP/ALL: Belum ada file firmware'}
+                        {apFileName ? `AP/ALL: ${apFileName}` : 'AP/ALL: Belum ada file'}
                       </span>
                     </div>
                   </div>
