@@ -61,9 +61,10 @@ export interface OdinFlashProps {
   onDevicesUpdate?: (devices: Record<string, DeviceData>) => void;
   onVerifyProgress?: (progress: number) => void;
   onVerifyStateChange?: (verifying: boolean, progress: number) => void;
+  onApFileChange?: (filename: string) => void;
 }
 
-const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, selectedSerials, setSelectedSerials, onDevicesUpdate, onVerifyProgress, onVerifyStateChange }, ref) => {
+const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, selectedSerials, setSelectedSerials, onDevicesUpdate, onVerifyProgress, onVerifyStateChange, onApFileChange }, ref) => {
   const [filePaths, setFilePaths] = useState<FilePaths>({ bl: "", ap: "", cp: "", csc: "", userdata: "" });
   const [verifyState, setVerifyState] = useState<Record<SlotKey, { text: string; progress: number; verifying: boolean }>>({
     bl: { text: "", progress: 0, verifying: false },
@@ -82,10 +83,23 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   const selectedSerialsRef = useRef(selectedSerials);
   const allSerialsRef = useRef(allSerials);
   const scanInFlightRef = useRef(false);
+  const latestVerifyIdRef = useRef<Record<SlotKey, number>>({ bl: 0, ap: 0, cp: 0, csc: 0, userdata: 0 });
   devicesRef.current = devices;
   isFlashingRef.current = isFlashing;
   selectedSerialsRef.current = selectedSerials;
   allSerialsRef.current = allSerials;
+
+  const apFilename = useMemo(() => {
+    if (filePaths.ap) return filePaths.ap.split(/[/\\]/).pop() || "";
+    if (verifyState.ap.verifying || verifyState.ap.text) return verifyState.ap.text;
+    return "";
+  }, [filePaths.ap, verifyState.ap]);
+
+  useEffect(() => {
+    if (onApFileChange) {
+      onApFileChange(apFilename);
+    }
+  }, [apFilename, onApFileChange]);
 
   useImperativeHandle(ref, () => ({
     startFlash: async () => {
@@ -417,15 +431,18 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   }
 
   async function verifyFile(slot: SlotKey, path: string) {
+    if (!path) return;
+    const verifyId = Date.now() + Math.random();
+    latestVerifyIdRef.current[slot] = verifyId;
     const fname = (path.split(/[/\\]/).pop() || "").toUpperCase();
-    
+
     // Validasi awalan nama file sesuai slot
     if (slot === "bl" && !fname.startsWith("BL_")) {
       alert(`File salah! Slot BL hanya menerima file dengan awalan "BL_"\nFile Anda: ${fname}`);
       return;
     }
     if (slot === "ap" && !fname.startsWith("AP_") && !fname.startsWith("ALL_")) {
-      alert(`File salah! Slot AP hanya menerima file dengan awalan "AP_"\nFile Anda: ${fname}`);
+      alert(`File salah! Slot AP hanya menerima file dengan awalan "AP_" atau "ALL_"\nFile Anda: ${fname}`);
       return;
     }
     if (slot === "cp" && !fname.startsWith("CP_")) {
@@ -447,6 +464,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     }));
 
     const unlisten = await listen<string>(`md5-progress-${slot}`, (event) => {
+      if (latestVerifyIdRef.current[slot] !== verifyId) return;
       const msg = event.payload;
       const pctMatch = msg.match(/\((\d+)%\)/g);
       if (pctMatch) {
@@ -460,6 +478,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
 
     try {
       await invoke<string>("odin_check_file", { path, slot });
+      if (latestVerifyIdRef.current[slot] !== verifyId) return;
       const name = path.split(/[/\\]/).pop() || path;
       setFilePaths(prev => ({ ...prev, [slot]: path }));
       setVerifyState(prev => ({
@@ -467,6 +486,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
         [slot]: { text: name, progress: 100, verifying: false },
       }));
     } catch (err) {
+      if (latestVerifyIdRef.current[slot] !== verifyId) return;
       setFilePaths(prev => ({ ...prev, [slot]: "" }));
       setVerifyState(prev => ({
         ...prev,
@@ -483,6 +503,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   }
 
   function clearFiles() {
+    latestVerifyIdRef.current = { bl: 0, ap: 0, cp: 0, csc: 0, userdata: 0 };
     setFilePaths({ bl: "", ap: "", cp: "", csc: "", userdata: "" });
     setVerifyState({
       bl: { text: "", progress: 0, verifying: false },
@@ -494,6 +515,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   }
 
   function clearFile(slot: SlotKey) {
+    latestVerifyIdRef.current[slot] = Date.now() + Math.random();
     setFilePaths(prev => ({ ...prev, [slot]: "" }));
     setVerifyState(prev => ({ ...prev, [slot]: { text: "", progress: 0, verifying: false } }));
   }
@@ -703,18 +725,20 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
             <span>{readyToFlashCount > 0 ? "START FLASHING" : anyFlashing ? "FLASHING..." : "START FLASHING"}</span>
           </div>
         </button>
-        <button className="btn-icon" title="Refresh Devices" onClick={forceRefresh}>
-          <RefreshCw width={20} height={20} />
-        </button>
-        <button className="btn-icon" style={{ color: "#ff453a" }} title="Reset Busy Status" onClick={resetBusy}>
-          <ShieldAlert width={20} height={20} />
-        </button>
-        <button className="btn-icon btn-icon-warning" title="Reset Stored Device Metadata" onClick={resetDeviceMetadata}>
-          <DatabaseZap width={20} height={20} />
-        </button>
-        <button className="btn-icon" title="Clear files" onClick={clearFiles}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-        </button>
+        <div className="action-sub-grid">
+          <button className="btn-icon" title="Refresh Devices" onClick={forceRefresh}>
+            <RefreshCw width={20} height={20} />
+          </button>
+          <button className="btn-icon" style={{ color: "#ff453a" }} title="Reset Busy Status" onClick={resetBusy}>
+            <ShieldAlert width={20} height={20} />
+          </button>
+          <button className="btn-icon btn-icon-warning" title="Reset Stored Device Metadata" onClick={resetDeviceMetadata}>
+            <DatabaseZap width={20} height={20} />
+          </button>
+          <button className="btn-icon" title="Clear files" onClick={clearFiles}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+          </button>
+        </div>
       </div>
 
       {logModal && (

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -92,6 +93,18 @@ static IPC_SENDER: Mutex<Option<Sender<String>>> = Mutex::new(None);
 
 // ponytail: track active process IDs (PIDs) to kill only the current instance's processes during emergency stop instead of killing globally
 static ACTIVE_PIDS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+// ponytail: track active MD5 check process per slot to auto-cancel previous check when a slot is overwritten
+static ACTIVE_MD5_PIDS: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
+
+fn kill_pid(pid: u32) {
+    #[cfg(target_os = "windows")]
+    let _ = Command::new("taskkill")
+        .args(&["/F", "/PID", &pid.to_string(), "/T"])
+        .creation_flags(0x08000000)
+        .output();
+    #[cfg(not(target_os = "windows"))]
+    let _ = Command::new("kill").args(&["-9", &pid.to_string()]).output();
+}
 
 struct PidGuard(u32);
 
@@ -608,6 +621,14 @@ fn odin_check_file_blocking(
     path: String,
     slot: String,
 ) -> Result<String, String> {
+    // ponytail: auto-cancel previous MD5 check process for this slot if running
+    if let Ok(mut lock) = ACTIVE_MD5_PIDS.lock() {
+        let map = lock.get_or_insert_with(HashMap::new);
+        if let Some(old_pid) = map.remove(&slot) {
+            kill_pid(old_pid);
+        }
+    }
+
     let binary = get_odin_binary(&app);
     let mut cmd = Command::new(&binary);
     cmd.arg("--md5sum-only").arg("-a").arg(&path);
@@ -622,6 +643,9 @@ fn odin_check_file_blocking(
     {
         if let Ok(mut pids) = ACTIVE_PIDS.lock() {
             pids.push(pid);
+        }
+        if let Ok(mut lock) = ACTIVE_MD5_PIDS.lock() {
+            lock.get_or_insert_with(HashMap::new).insert(slot.clone(), pid);
         }
     }
     let _guard = PidGuard(pid);
@@ -669,6 +693,15 @@ fn odin_check_file_blocking(
 
     let status = child.wait().map_err(|e| e.to_string())?;
     let stderr = join_pipe_output(stderr_reader);
+
+    // ponytail: remove slot PID from active map when done
+    if let Ok(mut lock) = ACTIVE_MD5_PIDS.lock() {
+        if let Some(map) = lock.as_mut() {
+            if map.get(&slot) == Some(&pid) {
+                map.remove(&slot);
+            }
+        }
+    }
 
     if status.success() {
         Ok("Valid".to_string())

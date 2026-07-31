@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X, Download, ShieldAlert, DatabaseZap } from "lucide-react";
+import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X, Download, ShieldAlert, DatabaseZap, FileText } from "lucide-react";
 import OdinFlash, { OdinFlashRef, DeviceData } from "./OdinFlash";
 import logo from './assets/logo.png';
 import confetti from 'canvas-confetti';
@@ -82,6 +82,7 @@ export default function App() {
   const [currentVerifyProgress, setCurrentVerifyProgress] = useState(0);
   const [isVerifyingMd5, setIsVerifyingMd5] = useState(false);
   const [verifyMd5Progress, setVerifyMd5Progress] = useState(0);
+  const [apFileName, setApFileName] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -98,6 +99,7 @@ export default function App() {
 
   // Download Modal State
   const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [showWifiModal, setShowWifiModal] = useState(false);
   const [downloadSelectedDevices, setDownloadSelectedDevices] = useState<string[]>([]);
 
   // Master Sequence States
@@ -1020,6 +1022,60 @@ export default function App() {
           </div>
         )}
 
+        {/* ── WIFI CONFIG PRESET MODAL ── */}
+        {showWifiModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setShowWifiModal(false)}>
+            <div className="bg-[#181818] border border-[#2a2a2a] rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-6 border-b border-[#2a2a2a] pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-green-500/20 flex items-center justify-center border border-green-500/30">
+                    <Wifi className="w-5 h-5 text-green-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-wider text-white">Preset WiFi Config</h3>
+                    <p className="text-[10px] text-white/40 font-mono">Set SSID & Password untuk WiFi Connect</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowWifiModal(false)} className="p-2 text-white/40 hover:text-white hover:bg-white/10 transition-all rounded-xl">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex flex-col gap-4">
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-wider text-white/40 mb-1.5 block">Nama WiFi (SSID)</label>
+                  <input
+                    value={ssid}
+                    onChange={e => setSsid(e.target.value)}
+                    className="win-input w-full px-4 py-3 rounded-xl text-sm"
+                    placeholder="Nama WiFi (SSID)"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-wider text-white/40 mb-1.5 block">Kata Sandi (Password)</label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    className="win-input w-full px-4 py-3 rounded-xl text-sm"
+                    placeholder="Kata Sandi (kosongkan jika Open WiFi)"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-[#2a2a2a]">
+                <button
+                  onClick={() => setShowWifiModal(false)}
+                  className="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white rounded-xl text-xs font-bold transition-all shadow-[0_0_15px_rgba(34,197,94,0.3)]"
+                >
+                  Simpan & Tutup
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── NAVBAR ── */}
         <header className="flex items-center justify-center px-4 md:px-10 h-16 md:h-20 bg-[#0d0d0d] border-b border-[#222] shrink-0" data-tauri-drag-region>
           {/* Tabs - Centered */}
@@ -1067,6 +1123,7 @@ export default function App() {
                 setIsVerifyingMd5(verifying);
                 setVerifyMd5Progress(progress);
               }}
+              onApFileChange={setApFileName}
             />
           </div>
         </div>
@@ -1180,20 +1237,6 @@ export default function App() {
             {/* Right: Dashboard */}
             <div className="flex-1 flex flex-col gap-6 md:gap-10 min-w-0">
 
-              {/* WIFI CONFIG CARD */}
-              <div className="p-4 md:p-8 bg-[#181818] border border-[#2a2a2a] rounded-xl md:rounded-2xl">
-                <div className="flex items-center justify-center mb-6">
-                  <div className="flex items-center gap-3">
-                    <Wifi className="w-5 h-5 text-white/40" />
-                    <span className="text-[12px] font-black uppercase tracking-widest text-white/40">Pengaturan WiFi</span>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-8">
-                  <input value={ssid} onChange={e => setSsid(e.target.value)} className="win-input px-4 md:px-6 py-3 md:py-4 rounded-xl text-sm" placeholder="Nama WiFi (SSID)" />
-                  <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="win-input px-4 md:px-6 py-3 md:py-4 rounded-xl text-sm" placeholder="Kata Sandi" />
-                </div>
-              </div>
-
               {/* MASTER SEQUENCE CARD */}
               <div className="p-4 md:p-8 bg-[#181818] border border-[#2a2a2a] rounded-xl md:rounded-2xl relative overflow-hidden">
                 <div className="flex items-center justify-center mb-6 md:mb-10">
@@ -1236,7 +1279,15 @@ export default function App() {
                       </div>
                       <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqGba ? 'text-purple-400' : 'text-white/40'}`}>Setup GBA</span>
                     </div>
-                    <div onClick={() => !loading && setSeqWifi(!seqWifi)} className={`p-6 border rounded-xl transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqWifi ? 'border-green-500 bg-green-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}>
+                    <div
+                      onClick={() => !loading && setSeqWifi(!seqWifi)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setShowWifiModal(true);
+                      }}
+                      title="Klik kiri: Toggle WiFi Connect | Klik kanan: Preset SSID & Password"
+                      className={`p-6 border rounded-xl transition-all cursor-pointer flex flex-col items-center justify-center gap-4 relative group ${seqWifi ? 'border-green-500 bg-green-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}
+                    >
                       <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqWifi ? 'bg-green-500 border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.5)]' : 'border-white/20'}`}>
                         {seqWifi && <Check className="w-5 h-5 text-white" strokeWidth={4} />}
                       </div>
@@ -1276,6 +1327,23 @@ export default function App() {
                         : 'Jalankan Automasi'}
                     </span>
                   </button>
+
+                  {/* AP / ALL Firmware Filename Badge */}
+                  <div className="flex items-center justify-center mt-3">
+                    <div
+                      className={`px-3.5 py-1.5 rounded-lg border text-[11px] font-mono flex items-center gap-2 max-w-full overflow-hidden transition-all shadow-sm ${
+                        apFileName
+                          ? 'border-orange-500/40 bg-orange-500/10 text-orange-300 shadow-[0_0_10px_rgba(249,115,22,0.15)]'
+                          : 'border-white/10 bg-white/5 text-white/30'
+                      }`}
+                      title={apFileName ? `File AP/ALL: ${apFileName}` : "Belum ada file AP/ALL yang dipilih pada tab Firmware"}
+                    >
+                      <FileText className={`w-3.5 h-3.5 shrink-0 ${apFileName ? 'text-orange-400 animate-pulse' : 'text-white/20'}`} />
+                      <span className="truncate">
+                        {apFileName ? `AP/ALL: ${apFileName}` : 'AP/ALL: Belum ada file firmware'}
+                      </span>
+                    </div>
+                  </div>
                 </div>
                 {loading && currentStep !== null && <div className="absolute bottom-0 left-0 h-1 bg-blue-500 w-full animate-pulse"></div>}
               </div>
@@ -1358,7 +1426,6 @@ export default function App() {
             <div className={`w-2.5 h-2.5 rounded-full ${mergedDevices.length > 0 ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.4)]' : 'bg-white/10'}`} />
             <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{mergedDevices.length} Units Connected</span>
           </div>
-          <span className="text-[11px] font-black tracking-[0.2em] text-blue-500/80 uppercase">v1.8.3 &bull; FlashKit By Endri-Pro</span>
         </footer>
 
       </div>
