@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ShieldAlert, RefreshCw, DatabaseZap, Trash2 } from "lucide-react";
@@ -17,6 +17,24 @@ interface FilePaths {
   userdata: string;
 }
 
+interface ServerFileEntry {
+  path: string;
+  name: string;
+  is_dir: boolean;
+}
+
+interface WebProgressResponse {
+  seq: number;
+  events: { seq: number; device: string; line: string }[];
+}
+
+interface SharedUiState {
+  firmware_files: FilePaths;
+  selected_devices: string[];
+  odin_devices?: Record<string, DeviceData>;
+  updated_at_ms: number;
+}
+
 export interface DeviceData {
   path: string;
   port: string;
@@ -32,6 +50,7 @@ export interface DeviceData {
 export interface OdinFlashRef {
   startFlash: () => Promise<boolean>;
   hasCheckedDevices: () => boolean;
+  refreshDevices: () => Promise<void>;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -40,6 +59,45 @@ function getTimestamp() {
   const now = new Date();
   const pad = (n: number) => n.toString().padStart(2, "0");
   return `[${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}]`;
+}
+
+function sameDeviceMap(a: Record<string, DeviceData>, b: Record<string, DeviceData>) {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every(key => {
+    const left = a[key];
+    const right = b[key];
+    return Boolean(right) &&
+      left.path === right.path &&
+      left.port === right.port &&
+      left.status === right.status &&
+      left.progress === right.progress &&
+      left.checked === right.checked &&
+      left.busyByOther === right.busyByOther &&
+      left.serial === right.serial &&
+      left.model === right.model &&
+      left.log === right.log;
+  });
+}
+
+function isTauriRuntime() {
+  return Boolean((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__);
+}
+
+function desktopBridgeUrl() {
+  return "/bridge";
+}
+
+async function bridgeInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  const response = await fetch(`${desktopBridgeUrl()}/invoke`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ command, args: args || {} }),
+  });
+  const payload = await response.json();
+  if (!payload.ok) throw new Error(payload.error || `Bridge command failed: ${command}`);
+  return payload.value as T;
 }
 
 // Removed extractUsbPort as it is replaced by Rust resolve_usb_path
@@ -52,6 +110,24 @@ const SLOT_LABELS: Record<SlotKey, string> = {
   userdata: "USERDATA",
 };
 
+function normalizeModelName(rawModel?: string): string {
+  if (!rawModel) return "Unknown Model";
+  let cleaned = rawModel.trim().replace(/_/g, "-").toUpperCase();
+  if (cleaned.startsWith("SM") && !cleaned.startsWith("SM-")) {
+    cleaned = cleaned.replace(/^SM/, "SM-");
+  }
+  return cleaned || "Unknown Model";
+}
+
+// ponytail: parse SM-XXXX model from AP_/ALL_ firmware filename
+function parseModelFromFirmware(filename: string): string | null {
+  const upper = filename.toUpperCase();
+  // match AP_ or ALL_ followed by model code, even if wrapped in "Verifying MD5 (AP_...)"
+  const m = upper.match(/(?:AP_|ALL_OXM_|ALL_)([A-Z0-9]+?)(?:XX|OXM)/);
+  if (!m) return null;
+  return normalizeModelName("SM-" + m[1]);
+}
+
 // ── Component ──────────────────────────────────────────────────────────
 
 export interface OdinFlashProps {
@@ -59,12 +135,16 @@ export interface OdinFlashProps {
   selectedSerials?: string[];
   setSelectedSerials?: React.Dispatch<React.SetStateAction<string[]>>;
   onDevicesUpdate?: (devices: Record<string, DeviceData>) => void;
+  sharedVerifyState?: Record<string, { text: string; progress: number; verifying: boolean }>;
   onVerifyProgress?: (progress: number) => void;
   onVerifyStateChange?: (verifying: boolean, progress: number) => void;
   onApFileChange?: (filename: string) => void;
 }
 
-const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, selectedSerials, setSelectedSerials, onDevicesUpdate, onVerifyProgress, onVerifyStateChange, onApFileChange }, ref) => {
+const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, selectedSerials, setSelectedSerials, onDevicesUpdate, sharedVerifyState, onVerifyProgress, onVerifyStateChange, onApFileChange }, ref) => {
+  const desktopActive = isTauriRuntime();
+  const invoke = <T,>(command: string, args?: Record<string, unknown>) =>
+    desktopActive ? tauriInvoke<T>(command, args) : bridgeInvoke<T>(command, args);
   const [filePaths, setFilePaths] = useState<FilePaths>({ bl: "", ap: "", cp: "", csc: "", userdata: "" });
   const [verifyState, setVerifyState] = useState<Record<SlotKey, { text: string; progress: number; verifying: boolean }>>({
     bl: { text: "", progress: 0, verifying: false },
@@ -76,6 +156,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   const [devices, setDevices] = useState<Record<string, DeviceData>>({});
   const [isFlashing, setIsFlashing] = useState(false);
   const [logModal, setLogModal] = useState<{ device: string; log: string } | null>(null);
+  const [filePicker, setFilePicker] = useState<{ slot: SlotKey; path: string; entries: ServerFileEntry[]; loading: boolean } | null>(null);
   const [busyDevices, setBusyDevices] = useState<string[]>([]);
 
   const devicesRef = useRef(devices);
@@ -84,10 +165,92 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   const allSerialsRef = useRef(allSerials);
   const scanInFlightRef = useRef(false);
   const latestVerifyIdRef = useRef<Record<SlotKey, number>>({ bl: 0, ap: 0, cp: 0, csc: 0, userdata: 0 });
+  const webProgressSeqRef = useRef(0);
+  const sharedUiSeenAt = useRef(0);
+  const sharedUiHydrated = useRef(false);
+  const localStateChangedAt = useRef(0); // ponytail: track when local state was last changed to guard against stale poll override
+  const applyingSharedFiles = useRef(false);
+  const filePathsRef = useRef(filePaths);
   devicesRef.current = devices;
   isFlashingRef.current = isFlashing;
   selectedSerialsRef.current = selectedSerials;
   allSerialsRef.current = allSerials;
+  filePathsRef.current = filePaths;
+
+  const applySharedFirmwareFiles = (state: SharedUiState) => {
+    if (!state.firmware_files || state.updated_at_ms <= sharedUiSeenAt.current) return;
+    sharedUiSeenAt.current = state.updated_at_ms;
+    applyingSharedFiles.current = true;
+    setFilePaths(prev => {
+      const merged = { ...prev };
+      let changed = false;
+      for (const key of ["bl", "ap", "cp", "csc", "userdata"] as SlotKey[]) {
+        const incomingPath = state.firmware_files[key] || "";
+        if (incomingPath !== prev[key]) {
+          if (incomingPath || !prev[key]) {
+            merged[key] = incomingPath;
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
+        filePathsRef.current = merged;
+      }
+      return changed ? merged : prev;
+    });
+    window.setTimeout(() => {
+      applyingSharedFiles.current = false;
+    }, 0);
+  };
+
+  useEffect(() => {
+    invoke<SharedUiState>("get_shared_ui_state")
+      .then(state => {
+        applySharedFirmwareFiles(state);
+        if (!desktopActive && state.odin_devices && Object.keys(state.odin_devices).length > 0) {
+          setDevices(state.odin_devices);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        sharedUiHydrated.current = true;
+      });
+  }, [desktopActive]);
+
+  useEffect(() => {
+    if (!desktopActive) return;
+    const unlisten = listen<SharedUiState>("shared-ui-updated", (event) => {
+      applySharedFirmwareFiles(event.payload);
+    });
+    return () => {
+      unlisten.then(fn => fn());
+    };
+  }, [desktopActive]);
+
+  useEffect(() => {
+    if (!sharedVerifyState || Object.keys(sharedVerifyState).length === 0) return;
+    setVerifyState(prev => {
+      let changed = false;
+      const next = { ...prev };
+      for (const slot of ["bl", "ap", "cp", "csc", "userdata"] as SlotKey[]) {
+        if (sharedVerifyState[slot]) {
+          const incoming = sharedVerifyState[slot];
+          if (prev[slot]?.verifying && incoming.verifying) {
+            continue;
+          }
+          if (
+            next[slot].text !== incoming.text ||
+            next[slot].progress !== incoming.progress ||
+            next[slot].verifying !== incoming.verifying
+          ) {
+            next[slot] = incoming;
+            changed = true;
+          }
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [sharedVerifyState]);
 
   const apFilename = useMemo(() => {
     if (filePaths.ap) return filePaths.ap.split(/[/\\]/).pop() || "";
@@ -101,13 +264,60 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     }
   }, [apFilename, onApFileChange]);
 
+  // ponytail: Auto-select devices matching firmware model directly
+  // ponytail: Auto-select removed per user preference.
+  // Matching firmware devices are highlighted with Amber outline (unchecked) or Blinking White outline (checked).
+
+  // ponytail: Reset any stale "Fail" status back to "Ready" whenever AP/ALL firmware is loaded or changed
+  useEffect(() => {
+    if (!filePaths.ap) return;
+    setDevices(prev => {
+      let changed = false;
+      const next = { ...prev };
+      for (const key of Object.keys(next)) {
+        if (next[key].status === "Fail" && !isFlashingRef.current) {
+          next[key] = { ...next[key], status: "Ready", progress: 0 };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [filePaths.ap]);
+
+  // ponytail: OdinFlash relies on App.tsx parent for global UI state polling to avoid duplicate ping-pong disk reads.
+
+  useEffect(() => {
+    if (!sharedUiHydrated.current || applyingSharedFiles.current || isFlashing) return;
+    localStateChangedAt.current = Date.now(); // ponytail: pre-mark before debounce fires
+    const timer = window.setTimeout(async () => {
+      try {
+        const state = await invoke<SharedUiState>("save_shared_ui_state", { firmware_files: filePaths });
+        sharedUiSeenAt.current = state.updated_at_ms;
+      } catch { }
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [filePaths, isFlashing]);
+
+  useEffect(() => {
+    if (desktopActive || !sharedUiHydrated.current || isFlashing) return;
+    localStateChangedAt.current = Date.now(); // ponytail: pre-mark before debounce fires
+    const timer = window.setTimeout(async () => {
+      try {
+        const state = await invoke<SharedUiState>("save_shared_ui_state", { odin_devices: devices });
+        sharedUiSeenAt.current = state.updated_at_ms;
+      } catch { }
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [desktopActive, devices, isFlashing]);
+
   useImperativeHandle(ref, () => ({
     startFlash: async () => {
       return await startFlashInternal();
     },
     hasCheckedDevices: () => {
       return Object.values(devicesRef.current).some(d => d.checked);
-    }
+    },
+    refreshDevices: forceRefresh,
   }));
 
   // Sync devices update back to parent
@@ -124,18 +334,26 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   }, [verifyState]);
 
   const overallFlashProgress = useMemo(() => {
-    const flashing = Object.values(devices).filter(d => d.status === "Flashing...");
-    if (flashing.length === 0) return 0;
-    return flashing.reduce((acc, d) => acc + d.progress, 0) / flashing.length;
+    const activeOrFinished = Object.values(devices).filter(d => d.status === "Flashing..." || d.status === "Pass" || d.status === "Fail");
+    if (activeOrFinished.length === 0) return 0;
+    const total = activeOrFinished.reduce((acc, d) => acc + (d.status === "Pass" ? 100 : d.progress), 0);
+    return Math.round(total / activeOrFinished.length);
   }, [devices]);
-
-  useEffect(() => {
-    if (onVerifyProgress) onVerifyProgress(overallFlashProgress > 0 ? overallFlashProgress : overallVerifyProgress);
-  }, [overallFlashProgress, overallVerifyProgress, onVerifyProgress]);
 
   const isVerifyingAnyFile = useMemo(() => {
     return Object.values(verifyState).some(s => s.verifying);
   }, [verifyState]);
+
+  useEffect(() => {
+    if (!onVerifyProgress) return;
+    if (isFlashing) {
+      onVerifyProgress(overallFlashProgress);
+    } else if (isVerifyingAnyFile) {
+      onVerifyProgress(overallVerifyProgress);
+    } else {
+      onVerifyProgress(0);
+    }
+  }, [isFlashing, isVerifyingAnyFile, overallFlashProgress, overallVerifyProgress, onVerifyProgress]);
 
   useEffect(() => {
     if (onVerifyStateChange) {
@@ -154,8 +372,15 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     };
     poll();
     const interval = setInterval(poll, 4000);
-    return () => clearInterval(interval);
-  }, []);
+    let unlistenBusy: (() => void) | undefined;
+    if (desktopActive) {
+      listen<string[]>("busy-state-updated", (event) => setBusyDevices(event.payload)).then(fn => { unlistenBusy = fn; });
+    }
+    return () => {
+      clearInterval(interval);
+      unlistenBusy?.();
+    };
+  }, [desktopActive]);
 
   const resetBusy = async () => {
     try {
@@ -220,6 +445,16 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                 serial = parsed.serial;
                 model = parsed.model;
               }
+              if (!serial || !model) {
+                for (let i = 0; i < localStorage.length; i++) {
+                  const key = localStorage.key(i);
+                  if (key && key.startsWith('port_history_')) {
+                    const parsed = JSON.parse(localStorage.getItem(key) || '{}');
+                    if (parsed.serial && !serial) serial = parsed.serial;
+                    if (parsed.model && !model) model = parsed.model;
+                  }
+                }
+              }
             } catch (e) {}
 
             updated[dev] = {
@@ -232,9 +467,18 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
               checked: false,
               log: `${getTimestamp()} Attached at ${dev}\n${getTimestamp()} Waiting for flash command...`,
             };
+          } else {
+            // ponytail: Reset stale "Fail" status back to "Ready" when device is detected in Download mode
+            if (updated[dev].status === "Fail" && !isFlashingRef.current) {
+              updated[dev] = {
+                ...updated[dev],
+                status: "Ready",
+                progress: 0,
+              };
+            }
           }
         }
-        return updated;
+        return sameDeviceMap(prev, updated) ? prev : updated;
       });
     } catch (e) {
       console.error("Scan error:", e);
@@ -249,7 +493,12 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
 
   useEffect(() => {
     scanDevices();
-    const interval = setInterval(scanDevices, 5000);
+    // ponytail: poll odin devices every 2 seconds since ADB list won't change if a device is already gone
+    const interval = setInterval(() => {
+      if (!isFlashingRef.current) {
+        scanDevices();
+      }
+    }, 2000);
     return () => clearInterval(interval);
   }, []);
 
@@ -300,7 +549,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
 
   // ── Listen flash progress events (THROTTLED) ─────────────────────────
 
-  const pendingUpdatesRef = useRef<Record<string, { progress: number, newLogLines: string[] }>>({});
+  const pendingUpdatesRef = useRef<Record<string, { progress: number, newLogLines: string[], status?: DeviceData["status"] }>>({});
   const updateIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -315,6 +564,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                 const updates = pendingUpdatesRef.current[dev];
                 next[dev] = { 
                   ...next[dev], 
+                  status: updates.status || next[dev].status,
                   progress: updates.progress !== -1 ? updates.progress : next[dev].progress,
                   log: updates.newLogLines.length > 0 ? `${next[dev].log}\n${updates.newLogLines.join('\n')}` : next[dev].log
                 };
@@ -336,6 +586,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   }, []);
 
   useEffect(() => {
+    if (!desktopActive) return;
     const unlisteners: (() => void)[] = [];
 
     Object.keys(devices).forEach(dev => {
@@ -348,6 +599,17 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
         }
 
         let clean = msg;
+        if (msg.startsWith("STATUS:Pass:")) {
+          pendingUpdatesRef.current[dev].status = "Pass";
+          pendingUpdatesRef.current[dev].progress = 100;
+          clean = msg.replace("STATUS:Pass:", "");
+        } else if (msg.startsWith("STATUS:Fail:")) {
+          pendingUpdatesRef.current[dev].status = "Fail";
+          clean = `ERROR: ${msg.replace("STATUS:Fail:", "")}`;
+        } else {
+          pendingUpdatesRef.current[dev].status = "Flashing...";
+        }
+
         if (pctMatch) {
           const lastPct = parseInt(pctMatch[pctMatch.length - 1].replace(/\D/g, ""), 10);
           pendingUpdatesRef.current[dev].progress = lastPct;
@@ -361,11 +623,16 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     });
 
     return () => unlisteners.forEach(fn => fn());
-  }, [Object.keys(devices).join(",")]);
+  }, [desktopActive, Object.keys(devices).join(",")]);
   // Listen to IPC shared progress from other instances
   useEffect(() => {
+    if (!desktopActive) return;
     const unlisten = listen<{ device: string; line: string }>("flash-progress-ipc", (event) => {
       const { device, line } = event.payload;
+
+      if (device.startsWith("md5-")) {
+        return;
+      }
 
       setDevices(prev => {
         if (!prev[device]) return prev;
@@ -415,11 +682,83 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     return () => {
       unlisten.then(fn => fn());
     };
-  }, []);
+  }, [desktopActive]);
+
+  useEffect(() => {
+    if (desktopActive || !isFlashing) return;
+    const poll = async () => {
+      try {
+        const response = await fetch(`${desktopBridgeUrl()}/progress?since=${webProgressSeqRef.current}`, { cache: "no-store" });
+        const payload: WebProgressResponse = await response.json();
+        webProgressSeqRef.current = payload.seq;
+        if (payload.events.length === 0) return;
+
+        setDevices(prev => {
+          let changed = false;
+          const next = { ...prev };
+          for (const event of payload.events) {
+            const current = next[event.device];
+            if (!current || current.status !== "Flashing...") continue;
+
+            let status: DeviceData["status"] = current.status;
+            let progress = current.progress;
+            let line = event.line;
+            if (line.startsWith("STATUS:Pass:")) {
+              status = "Pass";
+              progress = 100;
+              line = line.replace("STATUS:Pass:", "");
+            } else if (line.startsWith("STATUS:Fail:")) {
+              status = "Fail";
+              line = `ERROR: ${line.replace("STATUS:Fail:", "")}`;
+            } else {
+              const pctMatch = line.match(/\((\d+)%\)/g);
+              if (pctMatch) {
+                progress = parseInt(pctMatch[pctMatch.length - 1].replace(/\D/g, ""), 10);
+                line = line.replace(/\(\d+%\)/g, "").trim();
+              }
+            }
+            next[event.device] = {
+              ...current,
+              status,
+              progress,
+              log: line ? `${current.log}\n${getTimestamp()} ${line}` : current.log,
+            };
+            changed = true;
+          }
+          return changed ? next : prev;
+        });
+      } catch { }
+    };
+    poll();
+    const interval = window.setInterval(poll, 1000);
+    return () => window.clearInterval(interval);
+  }, [desktopActive, isFlashing]);
   // ── File selection & verification ────────────────────────────────────
 
-  async function selectFile(slot: SlotKey) {
+  async function openServerFilePicker(slot: SlotKey, path = "/run/media/endri-pro") {
+    setFilePicker({ slot, path, entries: [], loading: true });
     try {
+      const entries = await invoke<ServerFileEntry[]>("list_server_files", { path });
+      setFilePicker({ slot, path, entries, loading: false });
+    } catch (e) {
+      alert(`Gagal baca folder server:\n${e}`);
+      setFilePicker(null);
+    }
+  }
+
+  function parentServerPath(path: string) {
+    if (path === "/run/media/endri-pro") return path;
+    const parent = path.replace(/\/+$/, "").split("/").slice(0, -1).join("/") || "/run/media/endri-pro";
+    return parent.startsWith("/run/media/endri-pro") ? parent : "/run/media/endri-pro";
+  }
+
+  async function selectFile(slot: SlotKey) {
+    if (isFlashingRef.current) return;
+    try {
+      if (!desktopActive) {
+        await openServerFilePicker(slot);
+        return;
+      }
       const selected = await open({
         multiple: false,
         filters: [{ name: "Firmware", extensions: ["tar.md5", "tar", "img", "lz4"] }],
@@ -431,7 +770,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   }
 
   async function verifyFile(slot: SlotKey, path: string) {
-    if (!path) return;
+    if (!path || isFlashingRef.current) return;
     const verifyId = Date.now() + Math.random();
     latestVerifyIdRef.current[slot] = verifyId;
     const fname = (path.split(/[/\\]/).pop() || "").toUpperCase();
@@ -458,29 +797,40 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       return;
     }
 
+    const name = path.split(/[/\\]/).pop() || path;
+    setFilePaths(prev => ({ ...prev, [slot]: "" }));
     setVerifyState(prev => ({
       ...prev,
-      [slot]: { text: "Verifying MD5... 0%", progress: 0, verifying: true },
+      [slot]: { text: `Verifying MD5... 0% (${name})`, progress: 0, verifying: true },
     }));
 
-    const unlisten = await listen<string>(`md5-progress-${slot}`, (event) => {
-      if (latestVerifyIdRef.current[slot] !== verifyId) return;
-      const msg = event.payload;
-      const pctMatch = msg.match(/\((\d+)%\)/g);
-      if (pctMatch) {
-        const pct = parseInt(pctMatch[pctMatch.length - 1].replace(/\D/g, ""), 10);
-        setVerifyState(prev => ({
-          ...prev,
-          [slot]: { ...prev[slot], text: `Verifying MD5... ${pct}%`, progress: pct },
-        }));
-      }
-    });
+    let webProgressTimer: number | undefined;
+    const unlisten = desktopActive
+      ? await listen<string>(`md5-progress-${slot}`, (event) => {
+          if (latestVerifyIdRef.current[slot] !== verifyId) return;
+          const msg = event.payload;
+          const pctMatch = msg.match(/\((\d+)%\)/g);
+          if (pctMatch) {
+            const pct = parseInt(pctMatch[pctMatch.length - 1].replace(/\D/g, ""), 10);
+            setVerifyState(prev => ({
+              ...prev,
+              [slot]: { ...prev[slot], text: `Verifying MD5... ${pct}%`, progress: pct },
+            }));
+          }
+        })
+      : () => {};
 
     try {
       await invoke<string>("odin_check_file", { path, slot });
       if (latestVerifyIdRef.current[slot] !== verifyId) return;
-      const name = path.split(/[/\\]/).pop() || path;
-      setFilePaths(prev => ({ ...prev, [slot]: path }));
+      setFilePaths(prev => {
+        const nextFiles = { ...prev, [slot]: path };
+        filePathsRef.current = nextFiles;
+        invoke<SharedUiState>("save_shared_ui_state", { firmware_files: nextFiles })
+          .then(state => { sharedUiSeenAt.current = state.updated_at_ms; })
+          .catch(() => {});
+        return nextFiles;
+      });
       setVerifyState(prev => ({
         ...prev,
         [slot]: { text: name, progress: 100, verifying: false },
@@ -494,17 +844,25 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       }));
       alert(`File Verification Failed for ${slot.toUpperCase()}:\n${err}`);
     } finally {
+      if (webProgressTimer) window.clearInterval(webProgressTimer);
       unlisten();
     }
   }
 
   function handleDrop(slot: SlotKey, path: string) {
+    if (isFlashingRef.current) return;
     verifyFile(slot, path);
   }
 
   function clearFiles() {
+    if (isFlashingRef.current) return;
     latestVerifyIdRef.current = { bl: 0, ap: 0, cp: 0, csc: 0, userdata: 0 };
-    setFilePaths({ bl: "", ap: "", cp: "", csc: "", userdata: "" });
+    const empty = { bl: "", ap: "", cp: "", csc: "", userdata: "" };
+    setFilePaths(empty);
+    filePathsRef.current = empty;
+    invoke<SharedUiState>("save_shared_ui_state", { firmware_files: empty })
+      .then(state => { sharedUiSeenAt.current = state.updated_at_ms; })
+      .catch(() => {});
     setVerifyState({
       bl: { text: "", progress: 0, verifying: false },
       ap: { text: "", progress: 0, verifying: false },
@@ -515,14 +873,23 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   }
 
   function clearFile(slot: SlotKey) {
+    if (isFlashingRef.current) return;
     latestVerifyIdRef.current[slot] = Date.now() + Math.random();
-    setFilePaths(prev => ({ ...prev, [slot]: "" }));
+    setFilePaths(prev => {
+      const nextFiles = { ...prev, [slot]: "" };
+      filePathsRef.current = nextFiles;
+      invoke<SharedUiState>("save_shared_ui_state", { firmware_files: nextFiles })
+        .then(state => { sharedUiSeenAt.current = state.updated_at_ms; })
+        .catch(() => {});
+      return nextFiles;
+    });
     setVerifyState(prev => ({ ...prev, [slot]: { text: "", progress: 0, verifying: false } }));
   }
 
   // ── Drag-drop for firmware files ─────────────────────────────────────
 
   useEffect(() => {
+    if (!desktopActive) return;
     const unlistenDrop = listen<{ paths: string[] }>("tauri://drag-drop", event => {
       for (const path of event.payload.paths) {
         const fname = (path.split(/[/\\]/).pop() || "").toUpperCase();
@@ -535,7 +902,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       }
     });
     return () => { unlistenDrop.then(fn => fn()); };
-  }, [filePaths]);
+  }, [desktopActive, filePaths]);
 
   // ── Flash ─────────────────────────────────────────────────────────────
 
@@ -543,12 +910,20 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     const checked = Object.entries(devicesRef.current).filter(([, d]) => d.checked && d.status !== "Flashing...");
     if (checked.length === 0) return false;
 
-    if (!filePaths.bl && !filePaths.ap && !filePaths.cp && !filePaths.csc && !filePaths.userdata) {
+    const files = filePathsRef.current;
+    if (!files.bl && !files.ap && !files.cp && !files.csc && !files.userdata) {
       alert("Tidak ada file firmware yang dipilih di tab Odin Flash! Silakan pilih file tar.md5 terlebih dahulu.");
       return false;
     }
 
     setIsFlashing(true);
+    if (!desktopActive) {
+      try {
+        const response = await fetch(`${desktopBridgeUrl()}/progress?since=0`, { cache: "no-store" });
+        const payload: WebProgressResponse = await response.json();
+        webProgressSeqRef.current = payload.seq;
+      } catch { }
+    }
 
     // Tandai device sebagai busy untuk instance FlashKit lain
     const checkedSerials = checked.flatMap(([dev, data]) => data.serial ? [dev, data.serial] : [dev]);
@@ -557,43 +932,44 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     let anyFail = false;
     let anyPass = false;
 
-    await Promise.all(
-      checked.map(async ([dev]) => {
-        setDevices(prev => ({
-          ...prev,
-          [dev]: { ...prev[dev], status: "Flashing...", progress: 0, log: prev[dev].log + `\n${getTimestamp()} =====================\n${getTimestamp()} STARTING ODIN ENGINE\n${getTimestamp()} =====================` },
-        }));
-
-        try {
-          const result: string = await invoke("odin_flash_device", {
-            params: {
-              device: dev,
-              bl: filePaths.bl,
-              ap: filePaths.ap,
-              cp: filePaths.cp,
-              csc: filePaths.csc,
-              userdata: filePaths.userdata,
-            },
-          });
+    try {
+      await Promise.all(
+        checked.map(async ([dev]) => {
           setDevices(prev => ({
             ...prev,
-            [dev]: { ...prev[dev], status: "Pass", progress: 100, log: prev[dev].log + `\n${getTimestamp()} ${result}` },
+            [dev]: { ...prev[dev], status: "Flashing...", progress: 0, log: prev[dev].log + `\n${getTimestamp()} =====================\n${getTimestamp()} STARTING ODIN ENGINE\n${getTimestamp()} =====================` },
           }));
-          anyPass = true;
-        } catch (err) {
-          setDevices(prev => ({
-            ...prev,
-            [dev]: { ...prev[dev], status: "Fail", log: prev[dev].log + `\n${getTimestamp()} ERROR: ${err}` },
-          }));
-          anyFail = true;
-        }
-      })
-    );
 
-    // Hapus busy flag setelah selesai
-    try { await invoke("clear_busy", { serials: checkedSerials }); } catch { }
+          try {
+            const result: string = await invoke("odin_flash_device", {
+              params: {
+                device: dev,
+                bl: files.bl,
+                ap: files.ap,
+                cp: files.cp,
+                csc: files.csc,
+                userdata: files.userdata,
+              },
+            });
+            setDevices(prev => ({
+              ...prev,
+              [dev]: { ...prev[dev], status: "Pass", progress: 100, log: prev[dev].log + `\n${getTimestamp()} ${result}` },
+            }));
+            anyPass = true;
+          } catch (err) {
+            setDevices(prev => ({
+              ...prev,
+              [dev]: { ...prev[dev], status: "Fail", log: prev[dev].log + `\n${getTimestamp()} ERROR: ${err}` },
+            }));
+            anyFail = true;
+          }
+        })
+      );
+    } finally {
+      try { await invoke("clear_busy", { serials: checkedSerials }); } catch { }
+      setIsFlashing(false);
+    }
 
-    setIsFlashing(false);
     return !anyFail && anyPass;
   }
 
@@ -601,6 +977,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
 
   const readyToFlashCount = Object.values(devices).filter(d => d.checked && d.status !== "Flashing...").length;
   const anyFlashing = Object.values(devices).some(d => d.status === "Flashing...");
+  const firmwareReadonly = isFlashing || anyFlashing;
   const visibleDevices = Object.entries(devices).filter(([, d]) => d.status !== "Pass");
 
   return (
@@ -611,10 +988,40 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
             No devices currently in Odin state
           </div>
         ) : (
-          visibleDevices.map(([dev, data]) => (
-              <div key={dev} className={`device-card ${data.status === "Flashing..." ? "flashing-state" : ""}`}
-              onClick={() => setLogModal({ device: dev, log: data.log })}
-            >
+          visibleDevices.map(([dev, data]) => {
+            const matchingModel = parseModelFromFirmware(apFilename);
+            const normalizedMatching = matchingModel ? normalizeModelName(matchingModel) : null;
+            const normalizedDataModel = normalizeModelName(data.model);
+            const isModelMatch = Boolean(
+              normalizedMatching &&
+              normalizedDataModel.includes(normalizedMatching)
+            );
+
+            let cardExtraStyle: React.CSSProperties = {};
+            if (isModelMatch && data.status !== "Flashing...") {
+              if (data.checked) {
+                cardExtraStyle = {
+                  border: "2px solid #ffffff",
+                  boxShadow: "0 0 20px rgba(255, 255, 255, 0.8)",
+                  animation: "pulse 1.5s infinite ease-in-out",
+                  background: "rgba(255, 255, 255, 0.08)",
+                };
+              } else {
+                cardExtraStyle = {
+                  border: "2px solid rgba(245, 158, 11, 0.9)",
+                  boxShadow: "0 0 15px rgba(245, 158, 11, 0.4)",
+                  background: "rgba(245, 158, 11, 0.05)",
+                };
+              }
+            }
+
+            return (
+              <div
+                key={dev}
+                className={`device-card ${data.status === "Flashing..." ? "flashing-state" : ""}`}
+                style={cardExtraStyle}
+                onClick={() => setLogModal({ device: dev, log: data.log })}
+              >
               <div className="dev-progress-bg" style={{ width: `${data.progress}%` }}></div>
               <div className="dev-content">
                 <div className="dev-icon-area">
@@ -646,8 +1053,12 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                     }}
                   >
                     <input type="checkbox" checked={data.checked} readOnly disabled={data.status === "Flashing..." || (busyDevices.includes(dev) && data.status === "Ready")} />
-                    <div className="custom-checkbox">
-                      <svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"></path></svg>
+                    <div className={`custom-checkbox ${data.status === "Flashing..." ? 'flashing-checkbox' : ''}`}>
+                      {data.status === "Flashing..." ? (
+                        <RefreshCw className="w-3.5 h-3.5 text-white animate-spin" />
+                      ) : (
+                        <svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"></path></svg>
+                      )}
                     </div>
                   </div>
                   <h3 className="dev-title">
@@ -666,7 +1077,8 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                 </div>
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
 
@@ -689,7 +1101,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                     )}
                     <span>{SLOT_LABELS[slot]}</span>
                   </div>
-                  <div className="file-input-wrapper" onClick={() => selectFile(slot)}>
+                  <div className={`file-input-wrapper ${firmwareReadonly ? "readonly" : ""}`} onClick={() => selectFile(slot)}>
                     <input
                       type="text"
                       readOnly
@@ -701,7 +1113,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                       type="button"
                       className="file-clear-button"
                       title={`Clear ${SLOT_LABELS[slot]}`}
-                      disabled={vs.verifying || (!hasFile && !vs.text)}
+                      disabled={firmwareReadonly || vs.verifying || (!hasFile && !vs.text)}
                       onClick={(e) => {
                         e.stopPropagation();
                         clearFile(slot);
@@ -719,7 +1131,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       </div>
 
       <div className="action-section">
-        <button className="btn-start-flash" onClick={startFlashInternal} disabled={readyToFlashCount === 0}>
+        <button className="btn-start-flash" onClick={startFlashInternal} disabled={firmwareReadonly || readyToFlashCount === 0}>
           <div className="btn-content">
             <svg className={`gear-icon ${!anyFlashing ? "hidden" : ""}`} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
             <span>{readyToFlashCount > 0 ? "START FLASHING" : anyFlashing ? "FLASHING..." : "START FLASHING"}</span>
@@ -735,7 +1147,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
           <button className="btn-icon btn-icon-warning" title="Reset Stored Device Metadata" onClick={resetDeviceMetadata}>
             <DatabaseZap width={20} height={20} />
           </button>
-          <button className="btn-icon" title="Clear files" onClick={clearFiles}>
+          <button className="btn-icon" title="Clear files" onClick={clearFiles} disabled={firmwareReadonly}>
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
           </button>
         </div>
@@ -752,6 +1164,43 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
             </div>
             <div className="odin-modal-body">
               <div className="odin-device-log">{logModal.log}</div>
+            </div>
+          </div>
+        </div>
+      )}
+      {filePicker && (
+        <div className="odin-modal">
+          <div className="odin-modal-content server-file-picker">
+            <div className="odin-modal-header">
+              <h3>{SLOT_LABELS[filePicker.slot]} Server Files</h3>
+              <button className="btn-ghost-icon" onClick={() => setFilePicker(null)}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              </button>
+            </div>
+            <div className="odin-modal-body">
+              <div className="server-file-path">
+                <button type="button" className="server-file-up" onClick={() => openServerFilePicker(filePicker.slot, parentServerPath(filePicker.path))}>Up</button>
+                <span>{filePicker.path}</span>
+              </div>
+              <div className="server-file-list">
+                {filePicker.loading ? (
+                  <div className="server-file-empty">Loading...</div>
+                ) : filePicker.entries.length === 0 ? (
+                  <div className="server-file-empty">No firmware files</div>
+                ) : (
+                  filePicker.entries.map(entry => (
+                    <button
+                      key={entry.path}
+                      type="button"
+                      className={`server-file-row ${entry.is_dir ? "server-file-dir" : ""}`}
+                      onClick={() => entry.is_dir ? openServerFilePicker(filePicker.slot, entry.path) : (setFilePicker(null), verifyFile(filePicker.slot, entry.path))}
+                    >
+                      <span>{entry.is_dir ? "DIR" : "FILE"}</span>
+                      <strong>{entry.name}</strong>
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </div>

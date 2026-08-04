@@ -1,0 +1,202 @@
+{
+  "bow-rust/.vscode/extensions.json": {
+    "mtime": 1777276067.0,
+    "ast_hash": "a4038619f5414c01f04abbbdd4730820",
+    "semantic_hash": "a4038619f5414c01f04abbbdd4730820"
+  },
+  "bow-rust/package.json": {
+    "mtime": 1785488424.615941,
+    "ast_hash": "ae77f7b801a009fe20fa683763774398",
+    "semantic_hash": "ae77f7b801a009fe20fa683763774398"
+  },
+  "bow-rust/postcss.config.js": {
+    "mtime": 1777276211.0,
+    "ast_hash": "2dcf3574b7d437202b0a3f27f0b985e2",
+    "semantic_hash": "2dcf3574b7d437202b0a3f27f0b985e2"
+  },
+  "bow-rust/scripts/bump-version.mjs": {
+    "mtime": 1779332334.0,
+    "ast_hash": "4108990f0077ec3f277ec387120fe34b",
+    "semantic_hash": "4108990f0077ec3f277ec387120fe34b"
+  },
+  "bow-rust/src-tauri/build.rs": {
+    "mtime": 1777276067.0,
+    "ast_hash": "1be34a5c61c2c35365de3dab14298f0b",
+    "semantic_hash": "1be34a5c61c2c35365de3dab14298f0b"
+  },
+  "bow-rust/src-tauri/capabilities/default.json": {
+    "mtime": 1777883132.0,
+    "ast_hash": "fea2c09b116a57d28360f14cc69d30fd",
+    "semantic_hash": "fea2c09b116a57d28360f14cc69d30fd"
+  },
+  "bow-rust/src-tauri/src/lib.rs": {
+    "mtime": 1785596716.095567,
+    "ast_hash": "813c2af219ec79639da20a2171b233db",
+    "semantic_hash": "813c2af219ec79639da20a2171b233db"
+  },
+  "bow-rust/src-tauri/src/main.rs": {
+    "mtime": 1777336973.0,
+    "ast_hash": "df05189f914aed4947c012aafb45a049",
+    "semantic_hash": "df05189f914aed4947c012aafb45a049"
+  },
+  "bow-rust/src-tauri/tauri.conf.json": {
+    "mtime": 1785488424.615941,
+    "ast_hash": "c411dd1bae3b2631591646378642c053",
+    "semantic_hash": "c411dd1bae3b2631591646378642c053"
+  },
+  "bow-rust/src/App.tsx": {
+    "mtime": 1785605272.7554448,
+    "ast_hash": "7a566a0f3a8dfb09e5f637ec1c569ba8",
+    "semantic_hash": "7a566a0f3a8dfb09e5f637ec1c569ba8"
+  },
+  "bow-rust/src/OdinFlash.tsx": {
+    "mtime": 1785605272.7556295,
+    "ast_hash": "ac061189002d5c4a5e99513172436796",
+    "semantic_hash": "ac061189002d5c4a5e99513172436796"
+  },
+  "bow-rust/src/main.tsx": {
+    "mtime": 1777276430.0,
+    "ast_hash": "939d1c08b4bd846fbca58f824f15d548",
+    "semantic_hash": "939d1c08b4bd846fbca58f824f15d548"
+  },
+  "bow-rust/src/vite-env.d.ts": {
+    "mtime": 1777276067.0,
+    "ast_hash": "0352474ba2918efe13895edbc3780d94",
+    "semantic_hash": "0352474ba2918efe13895edbc3780d94"
+  },
+  "bow-rust/tsconfig.json": {
+    "mtime": 1777276067.0,
+    "ast_hash": "468c4a26d22e95a911cbe5ff0ed9ca27",
+    "semantic_hash": "468c4a26d22e95a911cbe5ff0ed9ca27"
+  },
+  "bow-rust/tsconfig.node.json": {
+    "mtime": 1777276067.0,
+    "ast_hash": "767b2e9abe6452170cdc399ca052cfbc",
+    "semantic_hash": "767b2e9abe6452170cdc399ca052cfbc"
+  },
+  "bow-rust/vite.config.ts": {
+    "mtime": 1785471769.896524,
+    "ast_hash": "e33d834af39f3d92b63e7deea58d6e7d",
+    "semantic_hash": "e33d834af39f3d92b63e7deea58d6e7d"
+  },
+  "build_packages.ps1": {
+    "mtime": 1784782696.2120504,
+    "ast_hash": "db76af81033dce18fef2970666fd5fb2",
+    "semantic_hash": "db76af81033dce18fef2970666fd5fb2"
+  },
+  "build_packages.sh": {
+    "mtime": 1785289579.8390377,
+    "ast_hash": "54b35da8b878ff23a9e29d82b7214ee1",
+    "semantic_hash": "54b35da8b878ff23a9e29d82b7214ee1"
+  },
+  "release.ps1": {
+    "mtime": 1784784506.287959,
+    "ast_hash": "6577339b0674b472eb51de2f964612b2",
+    "semantic_hash": "6577339b0674b472eb51de2f964612b2"
+  },
+  "release.sh": {
+    "mtime": 1784782573.8734825,
+    "ast_hash": "d3fc8cb71cc80686d0e8c100dfe5c4c8",
+    "semantic_hash": "d3fc8cb71cc80686d0e8c100dfe5c4c8"
+  },
+  "scripts/release-next.ps1": {
+    "mtime": 1784772990.5962427,
+    "ast_hash": "ef0ac5a0e0d35142d0e56bb72bfe4f68",
+    "semantic_hash": "ef0ac5a0e0d35142d0e56bb72bfe4f68"
+  },
+  "scripts/release-next.sh": {
+    "mtime": 1779332873.0,
+    "ast_hash": "e1eae4efbba11391cc0d72b519d9865c",
+    "semantic_hash": "e1eae4efbba11391cc0d72b519d9865c"
+  },
+  ".github/workflows/Build.yml": {
+    "mtime": 1784780351.0028346,
+    "ast_hash": "838f9216432ea5d7d96b18a98d5b5e21",
+    "semantic_hash": "838f9216432ea5d7d96b18a98d5b5e21"
+  },
+  ".github/workflows/release.yml": {
+    "mtime": 1784778497.863442,
+    "ast_hash": "1e66227bfa0c17a54878696258d68828",
+    "semantic_hash": "1e66227bfa0c17a54878696258d68828"
+  },
+  "README.md": {
+    "mtime": 1785229035.4176772,
+    "ast_hash": "cd142fde980a6d08c53b7fbca49b700b",
+    "semantic_hash": "cd142fde980a6d08c53b7fbca49b700b"
+  },
+  "docs/analisis_inovasi_odin_gba.md": {
+    "mtime": 1783150281.8030663,
+    "ast_hash": "93be87cb84fa7d86fedd2f1d68c17f91",
+    "semantic_hash": "93be87cb84fa7d86fedd2f1d68c17f91"
+  },
+  "bow-rust/app-icon.png": {
+    "mtime": 1777517969.0,
+    "ast_hash": "3c690c4138d4eb733dcad63b8168940c",
+    "semantic_hash": "3c690c4138d4eb733dcad63b8168940c"
+  },
+  "bow-rust/public/tauri.svg": {
+    "mtime": 1777518108.0,
+    "ast_hash": "3c690c4138d4eb733dcad63b8168940c",
+    "semantic_hash": "3c690c4138d4eb733dcad63b8168940c"
+  },
+  "bow-rust/public/vite.svg": {
+    "mtime": 1777276067.0,
+    "ast_hash": "8e3a10e157f75ada21ab742c022d5430",
+    "semantic_hash": "8e3a10e157f75ada21ab742c022d5430"
+  },
+  "bow-rust/src-tauri/icons/128x128.png": {
+    "mtime": 1777519625.0,
+    "ast_hash": "1b0f39305a6c573cbb827b97c79e9ce4",
+    "semantic_hash": "1b0f39305a6c573cbb827b97c79e9ce4"
+  },
+  "bow-rust/src-tauri/icons/StoreLogo.png": {
+    "mtime": 1777519624.0,
+    "ast_hash": "e7beba722fc4122e5f40054e9a8a6637",
+    "semantic_hash": "e7beba722fc4122e5f40054e9a8a6637"
+  },
+  "bow-rust/src-tauri/icons/android/mipmap-hdpi/ic_launcher.png": {
+    "mtime": 1777519625.0,
+    "ast_hash": "c67213d62fa84f3a2651f3c7ba878ae1",
+    "semantic_hash": "c67213d62fa84f3a2651f3c7ba878ae1"
+  },
+  "bow-rust/src-tauri/icons/ios/AppIcon-20x20@1x.png": {
+    "mtime": 1777519625.0,
+    "ast_hash": "111fb8ca1f63d32539ec8afb429a4a12",
+    "semantic_hash": "111fb8ca1f63d32539ec8afb429a4a12"
+  },
+  "bow-rust/src/assets/logo.png": {
+    "mtime": 1777868095.0,
+    "ast_hash": "e5528b9940ccd405c8004feef47fd0ce",
+    "semantic_hash": "e5528b9940ccd405c8004feef47fd0ce"
+  },
+  "bow-rust/src/assets/react.svg": {
+    "mtime": 1777276067.0,
+    "ast_hash": "f0402b67b6ce880f65666bb49e841696",
+    "semantic_hash": "f0402b67b6ce880f65666bb49e841696"
+  },
+  "docs/odin_gba_innovation_slide.png": {
+    "mtime": 1783150176.1285803,
+    "ast_hash": "592181c1208a01318b2f9c40616ec3d0",
+    "semantic_hash": "592181c1208a01318b2f9c40616ec3d0"
+  },
+  "flashkit_apple_mockup.png": {
+    "mtime": 1777947342.0,
+    "ast_hash": "4089b77fb88275cbd94f7ccd33535684",
+    "semantic_hash": "4089b77fb88275cbd94f7ccd33535684"
+  },
+  "flashkit_odin_mockup.png": {
+    "mtime": 1777946204.0,
+    "ast_hash": "662c1d3993abf0769aafe2231dba34fd",
+    "semantic_hash": "662c1d3993abf0769aafe2231dba34fd"
+  },
+  "flashkit_v162_landing_mockup.png": {
+    "mtime": 1777945655.0,
+    "ast_hash": "92568760752c35aa46e99149188712f0",
+    "semantic_hash": "92568760752c35aa46e99149188712f0"
+  },
+  "software-agent.png": {
+    "mtime": 1777518727.0,
+    "ast_hash": "4cc6e6755b3173fb016ab93573809974",
+    "semantic_hash": "4cc6e6755b3173fb016ab93573809974"
+  }
+}

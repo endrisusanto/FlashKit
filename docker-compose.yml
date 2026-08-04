@@ -1,0 +1,10 @@
+services:
+  web:
+    build:
+      context: ./bow-rust
+    image: bow-flashkit-web
+    ports:
+      - "1420:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
