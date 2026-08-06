@@ -512,9 +512,9 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
         for (const dev of list) {
           const port = resolvedPorts[dev];
 
-          // Delete any existing device in updated that has the same physical port but a different path
+          // Delete any existing device in updated that has the same physical port but a different path (only if the old path is no longer in odin list)
           for (const [oldKey, oldData] of Object.entries(updated)) {
-            if (oldKey !== dev && oldData.port === port) {
+            if (oldKey !== dev && oldData.port === port && !list.includes(oldKey)) {
               delete updated[oldKey];
             }
           }
