@@ -1,7 +1,7 @@
 {
   "name": "flashkit",
   "private": true,
-  "version": "1.8.42",
+  "version": "1.8.48",
   "type": "module",
   "scripts": {
     "dev": "vite",
