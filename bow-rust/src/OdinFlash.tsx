@@ -1074,6 +1074,16 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     const checked = Object.entries(devicesRef.current).filter(([, d]) => d.checked && d.status !== "Flashing...");
     if (checked.length === 0) return false;
 
+    // Cek apakah perangkat yang dicentang benar-benar terdeteksi di Odin Mode (Download Mode)
+    try {
+      const activeOdinList: string[] = await invoke("odin_list_devices");
+      const notInOdin = checked.filter(([dev]) => !activeOdinList.includes(dev));
+      if (notInOdin.length > 0) {
+        alert("Perhatian: Perangkat yang dipilih belum berada dalam Odin Mode (Download Mode)!\nHarap masukkan perangkat ke Download Mode terlebih dahulu.");
+        return false;
+      }
+    } catch { }
+
     const files = filePathsRef.current;
     if (!files.bl && !files.ap && !files.cp && !files.csc && !files.userdata) {
       alert("Tidak ada file firmware yang dipilih di tab Odin Flash! Silakan pilih file tar.md5 terlebih dahulu.");
