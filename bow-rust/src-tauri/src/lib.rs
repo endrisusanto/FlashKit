@@ -1896,6 +1896,45 @@ fn emergency_stop_blocking() -> Result<(), String> {
                 .output();
         }
     }
+
+    // Force kill any orphaned odin processes
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = Command::new("pkill")
+            .args(&["-9", "-f", "odin"])
+            .output();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("taskkill")
+            .args(&["/F", "/IM", "odin*", "/T"])
+            .creation_flags(0x08000000)
+            .output();
+    }
+
+    // Clear busy devices
+    let mut busy_state = read_busy_state();
+    busy_state.busy_devices.clear();
+    busy_state.updated_at_ms = now_ms();
+    write_busy_state(&busy_state);
+
+    // Update shared UI state to reset loading and set Flashing... devices to Fail
+    let mut ui_state = read_shared_ui_state();
+    ui_state.automation_state.loading = false;
+    ui_state.automation_state.is_stopping = false;
+    if let Some(map) = ui_state.odin_devices.as_object_mut() {
+        for (_k, v) in map.iter_mut() {
+            if let Some(status) = v.get("status").and_then(|s| s.as_str()) {
+                if status == "Flashing..." {
+                    v["status"] = serde_json::json!("Fail");
+                    v["progress"] = serde_json::json!(0);
+                }
+            }
+        }
+    }
+    ui_state.updated_at_ms = now_ms();
+    write_shared_ui_state(&ui_state);
+
     Ok(())
 }
 

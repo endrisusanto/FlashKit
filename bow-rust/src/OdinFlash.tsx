@@ -53,6 +53,7 @@ export interface OdinFlashRef {
   startFlash: () => Promise<boolean>;
   hasCheckedDevices: () => boolean;
   refreshDevices: () => Promise<void>;
+  cancelFlashing?: () => void;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -378,6 +379,20 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     return () => window.clearTimeout(timer);
   }, [devices, isFlashing]);
 
+  const cancelAllFlashing = () => {
+    scanInFlightRef.current = false;
+    pendingUpdatesRef.current = {};
+    setDevices(prev => {
+      const updated = { ...prev };
+      for (const dev of Object.keys(updated)) {
+        if (updated[dev].status === "Flashing...") {
+          updated[dev] = { ...updated[dev], status: "Fail", progress: 0 };
+        }
+      }
+      return updated;
+    });
+  };
+
   useImperativeHandle(ref, () => ({
     startFlash: async () => {
       return await startFlashInternal();
@@ -386,6 +401,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       return Object.values(devicesRef.current).some(d => d.checked);
     },
     refreshDevices: forceRefresh,
+    cancelFlashing: cancelAllFlashing,
   }));
 
   // Sync devices update back to parent

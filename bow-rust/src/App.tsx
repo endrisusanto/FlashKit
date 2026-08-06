@@ -592,6 +592,10 @@ export default function App() {
     if (stopRequested.current) return;
     stopRequested.current = true;
     setIsStopping(true);
+    setLoading(false);
+    if (odinRef.current && odinRef.current.cancelFlashing) {
+      odinRef.current.cancelFlashing();
+    }
     appendLog("‼ EMERGENCY STOP DIAKTIFKAN! Mematikan semua proses...");
 
     try {
@@ -601,13 +605,11 @@ export default function App() {
       appendLog(`✗ Gagal menghentikan proses: ${e}`);
     }
 
-    // Reset status setelah 10 detik agar tombol tidak menyala selamanya jika ada proses yang macet
     setTimeout(() => {
-      if (!loading) {
-        stopRequested.current = false;
-        setIsStopping(false);
-      }
-    }, 10000);
+      stopRequested.current = false;
+      setIsStopping(false);
+      setLoading(false);
+    }, 1500);
   };
 
   useEffect(() => {
