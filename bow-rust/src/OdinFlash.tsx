@@ -489,10 +489,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
           const isCurrentAdb = serial ? allSerialsRef.current?.includes(serial) : false;
 
           if (!isCurrentOdin && !isCurrentAdb && !isFlashingRef.current) {
-            // ponytail: Do not delete devices in "Pass" status while waiting for device bootup
-            if (updated[key].status !== "Pass") {
-              delete updated[key];
-            }
+            delete updated[key];
           }
         }
 

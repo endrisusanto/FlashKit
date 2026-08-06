@@ -1238,11 +1238,13 @@ export default function App() {
   const mergedDevices = useMemo<DeviceView[]>(() => {
     const list: DeviceView[] = [];
     const seenSerials = new Set<string>();
+    const seenPorts = new Set<string>();
 
     // 1. Add all ADB devices first
     devices.forEach(serial => {
       seenSerials.add(serial);
       const detail = deviceDetails[serial] || {};
+      if (detail.usb_port) seenPorts.add(detail.usb_port);
       let model = detail['ro.product.model'] || detail._model || detail.model;
 
       // Fallback 1: check port_history in localStorage
@@ -1285,17 +1287,20 @@ export default function App() {
       const serial = data.serial;
       const model = normalizeModelName(data.model);
       const port = data.port;
-      if (serial && seenSerials.has(serial)) {
+      const isSeenSerial = Boolean(serial && seenSerials.has(serial));
+      const isSeenPort = Boolean(port && seenPorts.has(port));
+
+      if (isSeenSerial || isSeenPort) {
         // Link existing ADB entry to Odin state
-        const idx = list.findIndex(item => item.serial === serial);
+        const idx = list.findIndex(item => (serial && item.serial === serial) || (port && item.port === port));
         if (idx !== -1) {
           list[idx].odinKey = path;
           list[idx].model = normalizeModelName(list[idx].model || model);
+          if (serial) list[idx].serial = serial;
         }
       } else {
-        if (serial) {
-          seenSerials.add(serial);
-        }
+        if (serial) seenSerials.add(serial);
+        if (port) seenPorts.add(port);
         list.push({
           id: serial || path,
           type: "odin",
