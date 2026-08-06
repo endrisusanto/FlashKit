@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { useLeaderElection } from "./hooks/useLeaderElection";
 import { listen } from "@tauri-apps/api/event";
 import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X, Download, ShieldAlert, DatabaseZap, FileText } from "lucide-react";
 import OdinFlash, { OdinFlashRef, DeviceData, SharedFirmwareFiles } from "./OdinFlash";
@@ -237,6 +238,7 @@ const startConfettiLoop = (onStop?: () => void) => {
 };
 
 export default function App() {
+  const isLeader = useLeaderElection();
   const [desktopActive, setDesktopActive] = useState(isTauriRuntime());
   const [desktopBridgeOnline, setDesktopBridgeOnline] = useState(false);
   const [devices, setDevices] = useState<string[]>([]);
@@ -394,6 +396,7 @@ export default function App() {
     if (desktopActive) return;
     let cancelled = false;
     const pollBridge = async () => {
+      if (!isLeader) return;
       try {
         const online = await pingDesktopBridge();
         if (!cancelled) setDesktopBridgeOnline(online);
@@ -515,6 +518,7 @@ export default function App() {
   useEffect(() => {
     if (desktopActive || !backendActive) return;
     const pollState = () => {
+      if (!isLeader) return;
       invoke<SharedUiState>("get_shared_ui_state")
         .then(state => {
           applySharedUiState(state);
@@ -649,6 +653,7 @@ export default function App() {
   useEffect(() => {
     if (!backendActive) return;
     const poll = async () => {
+      if (!isLeader) return;
       try {
         const [busy, cache] = await Promise.all([
           invoke<string[]>("get_busy_devices"),

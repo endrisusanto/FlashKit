@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle, useMemo } from "react";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useLeaderElection } from "./hooks/useLeaderElection";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ShieldAlert, RefreshCw, DatabaseZap, Trash2 } from "lucide-react";
 import "./OdinFlash.css";
@@ -148,6 +149,7 @@ export interface OdinFlashProps {
 }
 
 const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, selectedSerials, setSelectedSerials, odinDevices, onDevicesUpdate, sharedVerifyState, sharedFirmwareFiles, onVerifyProgress, onVerifyStateChange, onApFileChange }, ref) => {
+  const isLeader = useLeaderElection();
   const desktopActive = isTauriRuntime();
   const invoke = <T,>(command: string, args?: Record<string, unknown>) =>
     desktopActive ? tauriInvoke<T>(command, args) : bridgeInvoke<T>(command, args);
@@ -465,6 +467,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
 
   useEffect(() => {
     const poll = async () => {
+      if (!isLeader) return;
       try {
         const busy: string[] = await invoke("get_busy_devices");
         setBusyDevices(busy);
@@ -480,7 +483,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       clearInterval(interval);
       unlistenBusy?.();
     };
-  }, [desktopActive]);
+  }, [desktopActive, isLeader]);
 
   const resetBusy = async () => {
     try {
@@ -620,12 +623,13 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     scanDevices();
     // ponytail: poll odin devices every 2 seconds since ADB list won't change if a device is already gone
     const interval = setInterval(() => {
+      if (!isLeader) return;
       if (!isFlashingRef.current) {
         scanDevices();
       }
     }, 2000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isLeader]);
 
   // Run scanDevices immediately when connected ADB serials change to keep Odin list in sync
   useEffect(() => {
@@ -846,7 +850,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   }, [desktopActive]);
 
   useEffect(() => {
-    if (desktopActive || !isFlashing) return;
+    if (desktopActive || !isFlashing || !isLeader) return;
     const poll = async () => {
       try {
         const response = await fetch(`${desktopBridgeUrl()}/progress?since=${webProgressSeqRef.current}`, { cache: "no-store" });
