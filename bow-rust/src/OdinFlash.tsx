@@ -295,10 +295,17 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       const next = { ...prev };
       for (const slot of ["bl", "ap", "cp", "csc", "userdata"] as SlotKey[]) {
         const incoming = sharedVerifyState[slot] || { text: "", progress: 0, verifying: false };
+        const current = next[slot];
+        
+        // Prevent stale incoming progress from rewinding higher local verifying progress
+        if (current.verifying && incoming.verifying && incoming.progress < current.progress) {
+          continue;
+        }
+
         if (
-          next[slot].text !== incoming.text ||
-          next[slot].progress !== incoming.progress ||
-          next[slot].verifying !== incoming.verifying
+          current.text !== incoming.text ||
+          current.progress !== incoming.progress ||
+          current.verifying !== incoming.verifying
         ) {
           next[slot] = incoming;
           changed = true;
@@ -412,10 +419,17 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   }, [devices, onDevicesUpdate]);
 
   const overallVerifyProgress = useMemo(() => {
-    const verifying = Object.values(verifyState).filter(s => s.verifying);
-    if (verifying.length === 0) return 0;
-    return verifying.reduce((acc, s) => acc + s.progress, 0) / verifying.length;
-  }, [verifyState]);
+    const slots = (["bl", "ap", "cp", "csc", "userdata"] as SlotKey[]).filter(
+      s => verifyState[s].verifying || filePaths[s]
+    );
+    if (slots.length === 0) return 0;
+    const total = slots.reduce((acc, s) => {
+      if (verifyState[s].verifying) return acc + verifyState[s].progress;
+      if (filePaths[s]) return acc + 100;
+      return acc;
+    }, 0);
+    return Math.round(total / slots.length);
+  }, [verifyState, filePaths]);
 
   const overallFlashProgress = useMemo(() => {
     const activeOrFinished = Object.values(devices).filter(d => d.status === "Flashing..." || d.status === "Pass" || d.status === "Fail");
@@ -953,10 +967,14 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
           const pctMatch = msg.match(/\((\d+)%\)/g);
           if (pctMatch) {
             const pct = parseInt(pctMatch[pctMatch.length - 1].replace(/\D/g, ""), 10);
-            setVerifyState(prev => ({
-              ...prev,
-              [slot]: { ...prev[slot], text: `Verifying MD5... ${pct}%`, progress: pct },
-            }));
+            setVerifyState(prev => {
+              const curPct = prev[slot]?.progress || 0;
+              const nextPct = Math.max(curPct, pct);
+              return {
+                ...prev,
+                [slot]: { ...prev[slot], text: `Verifying MD5... ${nextPct}%`, progress: nextPct },
+              };
+            });
           }
         })
       : () => {};
