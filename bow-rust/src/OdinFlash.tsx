@@ -482,20 +482,14 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       setDevices(prev => {
         const updated = { ...prev };
 
-        // Clean up disconnected devices
+        // Clean up disconnected devices when not actively flashing
         for (const key of Object.keys(updated)) {
           const isCurrentOdin = list.includes(key);
           const serial = updated[key].serial;
           const isCurrentAdb = serial ? allSerialsRef.current?.includes(serial) : false;
 
-          if (!isCurrentOdin && !isCurrentAdb) {
-            if (
-              updated[key].status !== "Flashing..." &&
-              updated[key].status !== "Pass" &&
-              updated[key].status !== "Fail"
-            ) {
-              delete updated[key];
-            }
+          if (!isCurrentOdin && !isCurrentAdb && !isFlashingRef.current) {
+            delete updated[key];
           }
         }
 
@@ -551,8 +545,8 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
               log: `${getTimestamp()} Attached at ${dev}\n${getTimestamp()} Waiting for flash command...`,
             };
           } else {
-            // ponytail: Reset stale "Pass", "Fail", or "Flashing..." status back to "Ready" when device is detected in Download mode
-            if (!isFlashingRef.current && (updated[dev].status === "Pass" || updated[dev].status === "Fail" || updated[dev].status === "Flashing..." || updated[dev].progress >= 100)) {
+            // ponytail: Reset stale "Fail" status back to "Ready" when device is re-detected in Download mode; keep Flashing... intact
+            if (updated[dev].status === "Fail") {
               updated[dev] = {
                 ...updated[dev],
                 status: "Ready",
@@ -654,10 +648,12 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
               if (next[dev]) {
                 const updates = pendingUpdatesRef.current[dev];
                 let finalStatus = updates.status || next[dev].status;
-                if (isFlashingRef.current && (next[dev].status === "Pass" || next[dev].status === "Fail") && updates.status === "Flashing...") {
+                if (updates.progress >= 100 || updates.status === "Pass") {
+                  finalStatus = "Pass";
+                } else if (isFlashingRef.current && (next[dev].status === "Pass" || next[dev].status === "Fail") && updates.status === "Flashing...") {
                   finalStatus = next[dev].status;
                 }
-                const isPass = next[dev].status === "Pass" || finalStatus === "Pass";
+                const isPass = finalStatus === "Pass";
                 next[dev] = { 
                   ...next[dev], 
                   status: finalStatus,
