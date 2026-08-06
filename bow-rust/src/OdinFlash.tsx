@@ -568,6 +568,19 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   }
 
   async function forceRefresh() {
+    setDevices(prev => {
+      const updated = { ...prev };
+      for (const key of Object.keys(updated)) {
+        if (updated[key].status === "Pass" || updated[key].status === "Fail") {
+          updated[key] = {
+            ...updated[key],
+            status: "Ready",
+            progress: 0,
+          };
+        }
+      }
+      return updated;
+    });
     await scanDevices();
   }
 

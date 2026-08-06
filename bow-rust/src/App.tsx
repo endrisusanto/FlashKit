@@ -1837,19 +1837,19 @@ export default function App() {
 
                 <div className="flex flex-col gap-4 md:gap-8">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-6">
-                    <div onClick={toggleSeqOdin} className={`p-3 md:p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-2 md:gap-4 ${loading ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${seqOdin ? 'border-orange-500 bg-orange-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}>
+                    <div onClick={toggleSeqOdin} className={`p-3 md:p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-2 md:gap-4 ${loading ? 'cursor-not-allowed opacity-40 pointer-events-none' : 'cursor-pointer'} ${seqOdin ? 'border-orange-500 bg-orange-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}>
                       <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqOdin ? 'bg-orange-500 border-orange-500 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'border-white/20'}`}>
                         {seqOdin && <Check className="w-5 h-5 text-white" strokeWidth={4} />}
                       </div>
                       <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqOdin ? 'text-orange-400' : 'text-white/40'}`}>Odin Flash</span>
                     </div>
-                    <div onClick={toggleSeqSkipWz} className={`p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-4 ${loading ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${seqSkipWz ? 'border-blue-500 bg-blue-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}>
+                    <div onClick={toggleSeqSkipWz} className={`p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-4 ${loading ? 'cursor-not-allowed opacity-40 pointer-events-none' : 'cursor-pointer'} ${seqSkipWz ? 'border-blue-500 bg-blue-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}>
                       <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqSkipWz ? 'bg-blue-500 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.5)]' : 'border-white/20'}`}>
                         {seqSkipWz && <Check className="w-5 h-5 text-white" strokeWidth={4} />}
                       </div>
                       <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqSkipWz ? 'text-blue-400' : 'text-white/40'}`}>Skip WZ</span>
                     </div>
-                    <div onClick={toggleSeqGba} className={`p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-4 ${loading ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${seqGba ? 'border-purple-500 bg-purple-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}>
+                    <div onClick={toggleSeqGba} className={`p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-4 ${loading ? 'cursor-not-allowed opacity-40 pointer-events-none' : 'cursor-pointer'} ${seqGba ? 'border-purple-500 bg-purple-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}>
                       <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqGba ? 'bg-purple-500 border-purple-500 shadow-[0_0_15px_rgba(168,85,247,0.5)]' : 'border-white/20'}`}>
                         {seqGba && <Check className="w-5 h-5 text-white" strokeWidth={4} />}
                       </div>
@@ -1862,7 +1862,7 @@ export default function App() {
                         if (!loading) setShowWifiModal(true);
                       }}
                       title="Klik kiri: Toggle WiFi Connect | Klik kanan: Preset SSID & Password"
-                      className={`p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-4 relative group ${loading ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${seqWifi ? 'border-green-500 bg-green-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}
+                      className={`p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-4 relative group ${loading ? 'cursor-not-allowed opacity-40 pointer-events-none' : 'cursor-pointer'} ${seqWifi ? 'border-green-500 bg-green-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}
                     >
                       <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqWifi ? 'bg-green-500 border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.5)]' : 'border-white/20'}`}>
                         {seqWifi && <Check className="w-5 h-5 text-white" strokeWidth={4} />}
