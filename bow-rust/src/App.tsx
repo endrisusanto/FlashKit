@@ -1725,7 +1725,7 @@ export default function App() {
                         {group.devices.map((item) => {
                           const id = item.id;
                           const odinData = item.odinKey ? odinDeviceStates[item.odinKey] : undefined;
-                          const isOdinMode = item.type === "odin" || (odinData !== undefined);
+                          const isOdinMode = item.type === "odin" || (odinData !== undefined && (odinData.status === "Flashing..." || odinData.status === "Pass" || odinData.status === "Fail"));
                           const isFlashing = odinData?.status === "Flashing...";
                           const isPass = odinData?.status === "Pass";
                           const isFail = odinData?.status === "Fail";
