@@ -762,7 +762,13 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (backendActive) refreshDevices(true);
+    if (!backendActive) return;
+    refreshDevices(true);
+    // ponytail: Auto-poll Odin devices in background every 2s so READY badge updates automatically on Auto Setup tab
+    const interval = setInterval(() => {
+      odinRef.current?.refreshDevices().catch(() => {});
+    }, 2000);
+    return () => clearInterval(interval);
   }, [backendActive]);
 
   const resetBusy = async () => {
