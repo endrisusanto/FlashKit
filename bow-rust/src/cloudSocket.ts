@@ -47,8 +47,7 @@ class CloudSocket {
     try {
       const parsedUrl = new URL(url);
       this.agentId = parsedUrl.searchParams.get('agent_id') || '';
-      parsedUrl.search = '';
-      this.url = parsedUrl.toString();
+      this.url = `${parsedUrl.protocol}//${parsedUrl.host}`;
     } catch (e) {
       this.url = url;
     }
