@@ -128,4 +128,4 @@ jobs:
           releaseName: "FlashKit ${{ github.event_name == 'push' && github.ref_name || needs.bump-version.outputs.tag_name }}"
           releaseDraft: ${{ github.event_name == 'push' && false || inputs.draft }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
-          args: ${{ matrix.platform == 'windows-latest' && '--bundles nsis' || '--bundles deb,rpm,appimage' }}
+          args: ${{ matrix.platform == 'windows-latest' && '--bundles nsis,msi' || '--bundles deb,rpm,appimage' }}

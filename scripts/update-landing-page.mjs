@@ -58,6 +58,11 @@ function updateLandingPage(nextVersion) {
   const winReplacement = `<td>Windows Installer (.exe)</td>\n                    <td>${nextVersion}</td>\n                    <td>x64 / ARM64</td>\n                    <td><a href="https://github.com/endrisusanto/FlashKit/releases/download/v${nextVersion}/FlashKit_${nextVersion}_x64-setup.exe" class="btn-sm">Download for Windows</a></td>`;
   content = content.replace(winPattern, winReplacement);
 
+  // 7b. Update Windows MSI Row in download table
+  const msiPattern = /<td>Windows Installer \(\.msi\)<\/td>\s*<td>\d+\.\d+\.\d+<\/td>\s*<td>x64<\/td>\s*<td><a href="[^"]*" class="btn-sm">Download \.MSI<\/a><\/td>/i;
+  const msiReplacement = `<td>Windows Installer (.msi)</td>\n                    <td>${nextVersion}</td>\n                    <td>x64</td>\n                    <td><a href="https://github.com/endrisusanto/FlashKit/releases/download/v${nextVersion}/FlashKit_${nextVersion}_x64.msi" class="btn-sm">Download .MSI</a></td>`;
+  content = content.replace(msiPattern, msiReplacement);
+
   // 8. Update DEB Row in download table
   const debPattern = /<td>Linux \(\.deb\)<\/td>\s*<td>\d+\.\d+\.\d+<\/td>\s*<td>x64<\/td>\s*<td><a href="[^"]*" class="btn-sm">Download \.DEB<\/a><\/td>/i;
   const debReplacement = `<td>Linux (.deb)</td>\n                    <td>${nextVersion}</td>\n                    <td>x64</td>\n                    <td><a href="https://github.com/endrisusanto/FlashKit/releases/download/v${nextVersion}/FlashKit_${nextVersion}_amd64.deb" class="btn-sm">Download .DEB</a></td>`;
