@@ -79,6 +79,10 @@ Write-Host '[release] Updating app version files...'
 node $bumpScript --version $nextVersion | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Version update failed' }
 
+Write-Host '[release] Updating landing page version references and download links...'
+node (Join-Path $PSScriptRoot 'update-landing-page.mjs') $nextVersion | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Landing page update failed' }
+
 git add -A
 git diff --cached --quiet
 if ($LASTEXITCODE -eq 0) {

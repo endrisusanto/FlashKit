@@ -116,6 +116,9 @@ echo "[release] Next tag  : $NEXT_TAG"
 echo "[release] Updating app version files..."
 node "$APP_DIR/scripts/bump-version.mjs" --version "$NEXT_VERSION" >/dev/null
 
+echo "[release] Updating landing page version references and download links..."
+node "scripts/update-landing-page.mjs" "$NEXT_VERSION"
+
 git add -A
 
 if git diff --cached --quiet; then
