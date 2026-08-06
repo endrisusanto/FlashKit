@@ -53,7 +53,7 @@ pub fn run_cloud_agent_loop(app: AppHandle) {
         // Generate or get Agent ID
         let hostname = std::env::var("HOSTNAME")
             .or_else(|_| std::env::var("COMPUTERNAME"))
-            .unwrap_or_else(|_| "workstation".to_string());
+            .unwrap_or_else(|_| "workstation-1".to_string());
         
         let agent_id = std::env::var("FLASHKIT_AGENT_ID")
             .unwrap_or_else(|_| hostname.clone());
