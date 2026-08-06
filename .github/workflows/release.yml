@@ -74,8 +74,8 @@ jobs:
         id: create-release
         uses: softprops/action-gh-release@v2
         with:
-          draft: ${{ github.event_name == 'push' && false || inputs.draft }}
-          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+          draft: ${{ github.event_name != 'push' && inputs.draft == true }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease == true }}
           name: "FlashKit ${{ github.event_name == 'push' && github.ref_name || needs.bump-version.outputs.tag_name }}"
           tag_name: ${{ github.event_name == 'push' && github.ref_name || needs.bump-version.outputs.tag_name }}
           generate_release_notes: true
@@ -126,6 +126,6 @@ jobs:
           projectPath: ./bow-rust
           tagName: ${{ github.event_name == 'push' && github.ref_name || needs.bump-version.outputs.tag_name }}
           releaseName: "FlashKit ${{ github.event_name == 'push' && github.ref_name || needs.bump-version.outputs.tag_name }}"
-          releaseDraft: ${{ github.event_name == 'push' && false || inputs.draft }}
-          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+          releaseDraft: ${{ github.event_name != 'push' && inputs.draft == true }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease == true }}
           args: ${{ matrix.platform == 'windows-latest' && '--bundles nsis,msi' || '--bundles deb,rpm,appimage' }}
