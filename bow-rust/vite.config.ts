@@ -28,5 +28,17 @@ export default defineConfig(async () => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+    proxy: {
+      "/bridge": {
+        target: "http://127.0.0.1:9977",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/bridge/, ""),
+      },
+      "/host": {
+        target: "http://127.0.0.1:9914",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/host/, ""),
+      },
+    },
   },
 }));

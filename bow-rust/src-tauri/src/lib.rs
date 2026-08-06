@@ -55,10 +55,18 @@ fn get_odin_binary(app: &AppHandle) -> String {
 }
 
 fn extract_percentage(line: &str) -> Option<u32> {
-    if let Some(start) = line.rfind('(') {
-        if let Some(end) = line[start..].find("%)") {
-            let num_str = &line[start + 1..start + end];
-            if let Ok(pct) = num_str.parse::<u32>() {
+    if let Some(pct_idx) = line.find('%') {
+        let prefix = &line[..pct_idx];
+        let mut digits = String::new();
+        for ch in prefix.chars().rev() {
+            if ch.is_ascii_digit() {
+                digits.insert(0, ch);
+            } else if !digits.is_empty() {
+                break;
+            }
+        }
+        if let Ok(pct) = digits.parse::<u32>() {
+            if pct <= 100 {
                 return Some(pct);
             }
         }
@@ -91,6 +99,7 @@ enum IpcMessage {
     Progress { device: String, line: String },
     BusyState { devices: Vec<String> },
     DeviceCache { cache: DeviceCache },
+    SharedUiState { state: SharedUiState },
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -108,17 +117,29 @@ static SHARED_UI_MEMORY_STATE: Mutex<Option<SharedUiState>> = Mutex::new(None);
 
 fn broadcast_shared_ui_state(state: &SharedUiState) {
     let Ok(json) = serde_json::to_string(state) else { return; };
-    let frame = format!("data: {}\n\n", json);
+    let frame = format!("event: message\ndata: {}\n\n", json);
     if let Ok(mut streams) = WEB_SSE_STREAMS.lock() {
         streams.retain_mut(|stream| {
             use std::io::Write;
             stream.write_all(frame.as_bytes()).is_ok()
         });
     }
+    if let Ok(serialized) = serde_json::to_string(&IpcMessage::SharedUiState { state: state.clone() }) {
+        send_ipc(serialized);
+    }
 }
 
 fn update_verify_state(slot: &str, text: &str, progress: u32, verifying: bool) {
-    let mut state = read_shared_ui_state();
+    let mut guard = SHARED_UI_MEMORY_STATE.lock().unwrap();
+    let mut state = if let Some(cached) = &*guard {
+        cached.clone()
+    } else {
+        std::fs::read_to_string(SHARED_UI_FILE)
+            .ok()
+            .and_then(|data| serde_json::from_str::<SharedUiState>(&data).ok())
+            .unwrap_or_default()
+    };
+
     if state.verify_state.is_null() || !state.verify_state.is_object() {
         state.verify_state = serde_json::json!({});
     }
@@ -133,27 +154,53 @@ fn update_verify_state(slot: &str, text: &str, progress: u32, verifying: bool) {
         );
     }
     state.updated_at_ms = now_ms();
-    write_shared_ui_state(&state);
+    *guard = Some(state.clone());
+    if let Ok(json) = serde_json::to_string(&state) {
+        let _ = std::fs::write(SHARED_UI_FILE, json);
+    }
+    drop(guard);
     broadcast_shared_ui_state(&state);
 }
 
 fn update_odin_device_progress(device_id: &str, pct: u32, status: Option<&str>) {
-    let mut state = read_shared_ui_state();
+    let mut guard = SHARED_UI_MEMORY_STATE.lock().unwrap();
+    let mut state = if let Some(cached) = &*guard {
+        cached.clone()
+    } else {
+        std::fs::read_to_string(SHARED_UI_FILE)
+            .ok()
+            .and_then(|data| serde_json::from_str::<SharedUiState>(&data).ok())
+            .unwrap_or_default()
+    };
+
     let mut changed = false;
+    if state.odin_devices.is_null() || !state.odin_devices.is_object() {
+        state.odin_devices = serde_json::json!({});
+    }
     if let Some(map) = state.odin_devices.as_object_mut() {
-        if let Some(dev_val) = map.get_mut(device_id) {
-            if let Some(dev_obj) = dev_val.as_object_mut() {
-                dev_obj.insert("progress".to_string(), serde_json::json!(pct));
-                if let Some(st) = status {
-                    dev_obj.insert("status".to_string(), serde_json::json!(st));
-                }
-                changed = true;
+        let dev_obj = map
+            .entry(device_id.to_string())
+            .or_insert_with(|| serde_json::json!({
+                "path": device_id,
+                "status": "Ready",
+                "progress": 0,
+                "checked": true,
+            }));
+        if let Some(obj) = dev_obj.as_object_mut() {
+            obj.insert("progress".to_string(), serde_json::json!(pct));
+            if let Some(st) = status {
+                obj.insert("status".to_string(), serde_json::json!(st));
             }
+            changed = true;
         }
     }
     if changed {
         state.updated_at_ms = now_ms();
-        write_shared_ui_state(&state);
+        *guard = Some(state.clone());
+        if let Ok(json) = serde_json::to_string(&state) {
+            let _ = std::fs::write(SHARED_UI_FILE, json);
+        }
+        drop(guard);
         broadcast_shared_ui_state(&state);
     }
 }
@@ -270,6 +317,9 @@ fn emit_progress_locally(app: &AppHandle, msg_json: &str) {
             }
             IpcMessage::DeviceCache { cache } => {
                 let _ = app.emit("device-cache-updated", cache);
+            }
+            IpcMessage::SharedUiState { state } => {
+                let _ = app.emit("shared-ui-updated", state);
             }
         }
     }
@@ -426,13 +476,17 @@ fn handle_web_bridge_request(app: AppHandle, mut stream: TcpStream) {
         if stream.write_all(response.as_bytes()).is_ok() {
             let state = read_shared_ui_state();
             if let Ok(json) = serde_json::to_string(&state) {
-                let initial_frame = format!("data: {}\n\n", json);
+                let initial_frame = format!("event: message\ndata: {}\n\n", json);
                 let _ = stream.write_all(initial_frame.as_bytes());
             }
-            if let Ok(mut streams) = WEB_SSE_STREAMS.lock() {
-                if let Ok(cloned) = stream.try_clone() {
+            if let Ok(cloned) = stream.try_clone() {
+                if let Ok(mut streams) = WEB_SSE_STREAMS.lock() {
                     streams.push(cloned);
                 }
+            }
+            // ponytail: Keep request thread alive so TcpStream socket is not dropped and closed
+            while stream.write_all(b": ping\n\n").is_ok() {
+                thread::sleep(std::time::Duration::from_secs(15));
             }
         }
         return;
@@ -559,14 +613,7 @@ fn bridge_invoke(app: AppHandle, payload: BridgeInvokeRequest) -> String {
         "get_device_cache" => bridge_ok(get_device_cache()),
         "get_shared_ui_state" => bridge_ok(get_shared_ui_state()),
         "save_shared_ui_state" => {
-            let firmware_files = serde_json::from_value(
-                payload
-                    .args
-                    .get("firmware_files")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null),
-            )
-            .ok();
+            let firmware_files = payload.args.get("firmware_files").cloned();
             let selected_devices = serde_json::from_value(
                 payload
                     .args
@@ -925,7 +972,6 @@ fn odin_flash_device_blocking(
     let device_id = params.device.clone();
     let mut buffer = Vec::new();
     let mut byte_buf = [0u8; 1];
-    let mut last_pct = None;
     let mut is_odin_success = false;
 
     // Broadcast start of flash
@@ -943,6 +989,9 @@ fn odin_flash_device_blocking(
             || upper.contains("COMPLETED SUCCESSFULLY")
     };
 
+    let mut last_emitted_pct: u32 = 0;
+    let mut last_emitted_ms: u128 = 0;
+
     while reader.read_exact(&mut byte_buf).is_ok() {
         let b = byte_buf[0];
         if b == b'\n' || b == b'\r' {
@@ -951,17 +1000,19 @@ fn odin_flash_device_blocking(
                 if check_success_keyword(&line) {
                     is_odin_success = true;
                 }
-                if let Some(pct) = extract_percentage(&line) {
-                    if Some(pct) != last_pct {
-                        last_pct = Some(pct);
-                        let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
-                        broadcast_progress(&device_id, &line);
-                        update_odin_device_progress(&device_id, pct as u32, Some("Flashing..."));
-                    }
-                } else {
-                    let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
-                    broadcast_progress(&device_id, &line);
+                
+                let pct = extract_percentage(&line).unwrap_or(last_emitted_pct);
+                let now = now_ms();
+
+                let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
+                broadcast_progress(&device_id, &line);
+
+                if pct != last_emitted_pct || now >= last_emitted_ms + 100 {
+                    last_emitted_pct = pct;
+                    last_emitted_ms = now;
+                    update_odin_device_progress(&device_id, pct, Some("Flashing..."));
                 }
+
                 buffer.clear();
             }
         } else {
@@ -974,22 +1025,16 @@ fn odin_flash_device_blocking(
         if check_success_keyword(&line) {
             is_odin_success = true;
         }
-        if let Some(pct) = extract_percentage(&line) {
-            if Some(pct) != last_pct {
-                let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
-                broadcast_progress(&device_id, &line);
-                update_odin_device_progress(&device_id, pct as u32, Some("Flashing..."));
-            }
-        } else {
-            let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
-            broadcast_progress(&device_id, &line);
-        }
+        let pct = extract_percentage(&line).unwrap_or(last_emitted_pct);
+        let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
+        broadcast_progress(&device_id, &line);
+        update_odin_device_progress(&device_id, pct, Some("Flashing..."));
     }
 
     let status = child.wait().map_err(|e| e.to_string())?;
     let stderr = join_pipe_output(stderr_reader);
 
-    let is_pass = status.success() || is_odin_success || last_pct == Some(100);
+    let is_pass = status.success() || is_odin_success || last_emitted_pct == 100;
 
     if is_pass {
         let success_msg = format!("Flashing {} completed successfully.", params.device);
@@ -1069,7 +1114,8 @@ fn odin_check_file_blocking(
     if let Some(stdout) = child.stdout.take() {
         let mut reader = BufReader::new(stdout);
         let mut buffer = Vec::new();
-        let mut last_pct = None;
+        let mut last_emitted_pct: u32 = 0;
+        let mut last_emitted_ms: u128 = 0;
 
         // Read byte by byte to handle both \n and \r (odin4 uses \r for progress)
         let mut byte_buf = [0u8; 1];
@@ -1079,9 +1125,14 @@ fn odin_check_file_blocking(
                 if !buffer.is_empty() {
                     let line = String::from_utf8_lossy(&buffer).to_string();
                     if let Some(pct) = extract_percentage(&line) {
-                        if Some(pct) != last_pct {
-                            last_pct = Some(pct);
+                        let now = now_ms();
+                        if pct != last_emitted_pct {
                             let _ = window.emit(&format!("md5-progress-{}", slot), line.clone());
+                        }
+                        if pct == 100 || pct >= last_emitted_pct + 3 || now >= last_emitted_ms + 150 {
+                            last_emitted_pct = pct;
+                            last_emitted_ms = now;
+                            update_verify_state(&slot, &format!("Verifying MD5... {}% ({})", pct, fname), pct, true);
                         }
                     } else {
                         let _ = window.emit(&format!("md5-progress-{}", slot), line.clone());
@@ -1096,9 +1147,8 @@ fn odin_check_file_blocking(
         if !buffer.is_empty() {
             let line = String::from_utf8_lossy(&buffer).to_string();
             if let Some(pct) = extract_percentage(&line) {
-                if Some(pct) != last_pct {
-                    let _ = window.emit(&format!("md5-progress-{}", slot), line.clone());
-                }
+                let _ = window.emit(&format!("md5-progress-{}", slot), line.clone());
+                update_verify_state(&slot, &format!("Verifying MD5... {}% ({})", pct, fname), pct, true);
             } else {
                 let _ = window.emit(&format!("md5-progress-{}", slot), line.clone());
             }
@@ -1533,9 +1583,24 @@ fn read_shared_ui_state() -> SharedUiState {
         .ok()
         .and_then(|data| serde_json::from_str::<SharedUiState>(&data).ok())
         .unwrap_or_default();
-    // ponytail: Never load historical log text or stale stopping flag from disk file
+
+    // ponytail: Never load historical log text or stale stopping/loading/flashing flags from disk file
     state.automation_state.logs.clear();
     state.automation_state.is_stopping = false;
+    state.automation_state.loading = false;
+    state.automation_state.current_step = None;
+
+    if let Some(map) = state.odin_devices.as_object_mut() {
+        for (_key, val) in map.iter_mut() {
+            if let Some(obj) = val.as_object_mut() {
+                if obj.get("status").and_then(|s| s.as_str()) == Some("Flashing...") {
+                    obj.insert("status".to_string(), serde_json::json!("Ready"));
+                    obj.insert("progress".to_string(), serde_json::json!(0));
+                }
+            }
+        }
+    }
+
     if let Ok(mut guard) = SHARED_UI_MEMORY_STATE.lock() {
         *guard = Some(state.clone());
     }
@@ -1552,17 +1617,13 @@ fn write_shared_ui_state(state: &SharedUiState) {
 }
 
 fn clean_startup_cache() {
-    if let Ok(mut guard) = SHARED_UI_MEMORY_STATE.lock() {
-        *guard = None;
-    }
-    write_shared_ui_state(&SharedUiState {
-        updated_at_ms: now_ms(),
-        ..Default::default()
-    });
-
     let mut busy = read_busy_state();
     busy.busy_devices.clear();
     write_busy_state(&busy);
+
+    // ponytail: Reset shared UI state on startup so UI starts with a clean slate
+    let default_state = SharedUiState::default();
+    write_shared_ui_state(&default_state);
 }
 
 #[tauri::command]
@@ -1570,17 +1631,35 @@ fn get_shared_ui_state() -> SharedUiState {
     read_shared_ui_state()
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn save_shared_ui_state(
     app: AppHandle,
-    firmware_files: Option<SharedFirmwareFiles>,
+    firmware_files: Option<serde_json::Value>,
     selected_devices: Option<Vec<String>>,
     automation_state: Option<serde_json::Value>,
     odin_devices: Option<serde_json::Value>,
 ) -> SharedUiState {
-    let mut state = read_shared_ui_state();
-    if let Some(files) = firmware_files {
-        state.firmware_files = files;
+    let mut guard = SHARED_UI_MEMORY_STATE.lock().unwrap();
+    let mut state = if let Some(cached) = &*guard {
+        cached.clone()
+    } else {
+        std::fs::read_to_string(SHARED_UI_FILE)
+            .ok()
+            .and_then(|data| serde_json::from_str::<SharedUiState>(&data).ok())
+            .unwrap_or_default()
+    };
+
+
+
+    if let Some(val) = firmware_files {
+        if !val.is_null() && val.is_object() {
+            if let Ok(files) = serde_json::from_value::<SharedFirmwareFiles>(val) {
+                if files.bl.is_empty() && files.ap.is_empty() && files.cp.is_empty() && files.csc.is_empty() && files.userdata.is_empty() {
+                    state.verify_state = serde_json::json!({});
+                }
+                state.firmware_files = files;
+            }
+        }
     }
     if let Some(devices) = selected_devices {
         state.selected_devices = devices;
@@ -1612,7 +1691,18 @@ fn save_shared_ui_state(
         }
     }
     state.updated_at_ms = now_ms();
-    write_shared_ui_state(&state);
+    
+    // Save to memory cache
+    *guard = Some(state.clone());
+    
+    // Save to disk file
+    if let Ok(json) = serde_json::to_string(&state) {
+        let _ = std::fs::write(SHARED_UI_FILE, json);
+    }
+    
+    // Drop lock before broadcasting to prevent deadlock risks
+    drop(guard);
+
     broadcast_shared_ui_state(&state);
     let _ = app.emit("shared-ui-updated", state.clone());
     state

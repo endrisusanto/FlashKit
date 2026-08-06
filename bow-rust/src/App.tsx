@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X, Download, ShieldAlert, DatabaseZap, FileText } from "lucide-react";
-import OdinFlash, { OdinFlashRef, DeviceData } from "./OdinFlash";
+import OdinFlash, { OdinFlashRef, DeviceData, SharedFirmwareFiles } from "./OdinFlash";
 import logo from './assets/logo.png';
 import confetti from 'canvas-confetti';
 
@@ -73,17 +73,52 @@ function sameDeviceMap(a: Record<string, any>, b: Record<string, any>) {
   });
 }
 
+function sameFilePaths(a: SharedFirmwareFiles, b: SharedFirmwareFiles) {
+  if (!a || !b) return false;
+  return a.bl === b.bl && a.ap === b.ap && a.cp === b.cp && a.csc === b.csc && a.userdata === b.userdata;
+}
+
+function sameVerifyStateMap(a?: Record<string, any>, b?: Record<string, any>) {
+  if (!a || !b) return a === b;
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every(k => {
+    const vA = a[k];
+    const vB = b[k];
+    return vB && vA.text === vB.text && vA.progress === vB.progress && vA.verifying === vB.verifying;
+  });
+}
+
 function isTauriRuntime() {
   return Boolean((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__);
 }
 
-async function pingDesktopBridge() {
-  const response = await fetch(`${desktopBridgeUrl()}/status`, { cache: "no-store" });
-  return response.ok;
+function desktopBridgeUrl() {
+  const saved = localStorage.getItem("desktop_bridge_url");
+  if (saved) return saved;
+  return "/bridge";
 }
 
-function desktopBridgeUrl() {
-  return "/bridge";
+async function pingDesktopBridge() {
+  try {
+    const url = desktopBridgeUrl();
+    const response = await fetch(`${url}/status`, { cache: "no-store" });
+    if (response.ok) return true;
+  } catch {}
+
+  // ponytail: fallback direct port 9977 if relative /bridge is not proxied
+  if (!localStorage.getItem("desktop_bridge_url")) {
+    try {
+      const fallbackUrl = "http://" + window.location.hostname + ":9977";
+      const response = await fetch(`${fallbackUrl}/status`, { cache: "no-store" });
+      if (response.ok) {
+        localStorage.setItem("desktop_bridge_url", fallbackUrl);
+        return true;
+      }
+    } catch {}
+  }
+  return false;
 }
 
 function desktopHostUrl() {
@@ -135,12 +170,30 @@ function normalizeModelName(rawModel?: string): string {
   return cleaned || "Unknown Model";
 }
 
-// ponytail: parse SM-XXXX model from AP_/ALL_ firmware filename
-function parseModelFromFirmware(filename: string): string | null {
-  const upper = filename.toUpperCase();
-  const m = upper.match(/(?:AP_|ALL_OXM_|ALL_)([A-Z0-9]+?)(?:XX|OXM)/);
-  if (!m) return null;
-  return normalizeModelName("SM-" + m[1]);
+// ponytail: helper to check if local automation state matches remote applied state
+function isAutomationStateEqual(a: any, b: any): boolean {
+  if (!a || !b) return false;
+  return (
+    a.seq_odin === b.seq_odin &&
+    a.seq_skip_wz === b.seq_skip_wz &&
+    a.seq_gba === b.seq_gba &&
+    a.seq_wifi === b.seq_wifi &&
+    a.loading === b.loading &&
+    a.current_step === b.current_step &&
+    a.is_stopping === b.is_stopping &&
+    sameStringList(a.logs || [], b.logs || [])
+  );
+}
+
+// ponytail: check if firmware filename contains a device's model code (region-agnostic)
+function isFirmwareForModel(firmwareFilename: string, deviceModel: string): boolean {
+  if (!firmwareFilename || !deviceModel) return false;
+  const upper = firmwareFilename.toUpperCase();
+  // Extract raw model code: "SM-S721B" -> "S721B", "SM-F741B" -> "F741B"
+  const normalized = normalizeModelName(deviceModel);
+  const raw = normalized.replace(/^SM-/, "");
+  if (!raw || raw === "UNKNOWN MODEL") return false;
+  return upper.includes(raw);
 }
 
 function adbShellQuote(value: string) {
@@ -186,7 +239,8 @@ export default function App() {
   const [currentVerifyProgress, setCurrentVerifyProgress] = useState(0);
   const [isVerifyingMd5, setIsVerifyingMd5] = useState(false);
   const [verifyMd5Progress, setVerifyMd5Progress] = useState(0);
-  const [sharedVerifyState, setSharedVerifyState] = useState<Record<string, { text: string; progress: number; verifying: boolean }>>({});
+  const [sharedVerifyState, setSharedVerifyState] = useState<Record<string, { text: string; progress: number; verifying: boolean }> | undefined>(undefined);
+  const [sharedFirmwareFiles, setSharedFirmwareFiles] = useState<SharedFirmwareFiles | null>(null);
   const [apFileName, setApFileName] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [isRefreshingDevices, setIsRefreshingDevices] = useState(false);
@@ -221,7 +275,9 @@ export default function App() {
   const refreshInFlightRef = useRef(false);
   const sharedUiSeenAt = useRef(0);
   const sharedUiHydrated = useRef(false);
-  const applyingSharedState = useRef(false);
+  const lastAppliedAutomationState = useRef<any>(null);
+  const lastSavedSelectedDevices = useRef<string[]>([]);
+  const lastLocalSaveMs = useRef(0); // ponytail: debounce self-echo events
   const backendActive = desktopActive || desktopBridgeOnline;
 
   const invoke = async <T,>(command: string, args?: Record<string, unknown>) => {
@@ -242,6 +298,26 @@ export default function App() {
     } catch (e) {
       console.error(e);
     }
+  };
+
+  const toggleSeqOdin = () => {
+    if (loading) return;
+    setSeqOdin(prev => !prev);
+  };
+
+  const toggleSeqSkipWz = () => {
+    if (loading) return;
+    setSeqSkipWz(prev => !prev);
+  };
+
+  const toggleSeqGba = () => {
+    if (loading) return;
+    setSeqGba(prev => !prev);
+  };
+
+  const toggleSeqWifi = () => {
+    if (loading) return;
+    setSeqWifi(prev => !prev);
   };
 
   const appendLog = (msg: string) => {
@@ -323,45 +399,58 @@ export default function App() {
   }, [desktopActive]);
 
   const applySharedUiState = (state: SharedUiState) => {
+    if (!state || !state.updated_at_ms) return;
     if (state.updated_at_ms <= sharedUiSeenAt.current) return;
     sharedUiSeenAt.current = state.updated_at_ms;
-    applyingSharedState.current = true;
 
-    if (state.selected_devices) {
-      setSelectedDevices(prev => sameStringList(prev, state.selected_devices) ? prev : state.selected_devices);
+    // ponytail: skip automation_state & selected_devices echo from our own save
+    const isSelfEcho = Date.now() - lastLocalSaveMs.current < 150;
+
+    if (!isSelfEcho) {
+      // ponytail: sync selected_devices across all windows & clients
+      if (state.selected_devices) {
+        setSelectedDevices(prev => {
+          if (sameStringList(prev, state.selected_devices)) return prev;
+          lastSavedSelectedDevices.current = state.selected_devices;
+          return state.selected_devices;
+        });
+      }
+
+      // ponytail: sync automation_state (flow checkboxes, loading, logs) across all windows & clients
+      const incoming = state.automation_state;
+      if (incoming) {
+        if (!isAutomationStateEqual(incoming, lastAppliedAutomationState.current)) {
+          lastAppliedAutomationState.current = incoming;
+          setSeqOdin(incoming.seq_odin);
+          setSeqSkipWz(incoming.seq_skip_wz);
+          setSeqGba(incoming.seq_gba);
+          setSeqWifi(incoming.seq_wifi);
+          setLoading(incoming.loading);
+          setCurrentStep(incoming.current_step);
+          setIsStopping(incoming.is_stopping);
+          if (incoming.logs) setLogs(prev => sameStringList(prev, incoming.logs) ? prev : incoming.logs);
+        }
+      }
     }
 
-    const incoming = state.automation_state;
-    if (incoming) {
-      setSeqOdin(incoming.seq_odin);
-      setSeqSkipWz(incoming.seq_skip_wz);
-      setSeqGba(incoming.seq_gba);
-      setSeqWifi(incoming.seq_wifi);
-      setLoading(incoming.loading);
-      setCurrentStep(incoming.current_step);
-      setIsStopping(incoming.is_stopping);
-      if (incoming.logs) setLogs(prev => sameStringList(prev, incoming.logs) ? prev : incoming.logs);
-    }
-
+    // ponytail: always sync odin_devices, verify_state, firmware_files (no flicker risk)
     if (state.odin_devices) {
       const incomingOdin = state.odin_devices as Record<string, DeviceData>;
       setOdinDeviceStates(prev => sameDeviceMap(prev, incomingOdin) ? prev : incomingOdin);
     }
     if (state.verify_state && typeof state.verify_state === "object") {
-      setSharedVerifyState(state.verify_state as Record<string, { text: string; progress: number; verifying: boolean }>);
+      const incomingVerify = state.verify_state as Record<string, { text: string; progress: number; verifying: boolean }>;
+      setSharedVerifyState(prev => sameVerifyStateMap(prev, incomingVerify) ? prev : incomingVerify);
     }
-    if (state.firmware_files?.ap) {
-      const name = state.firmware_files.ap.split(/[/\\]/).pop() || "";
-      if (name) setApFileName(prev => prev === name ? prev : name);
+    if (state.firmware_files) {
+      setSharedFirmwareFiles(prev => sameFilePaths(prev || { bl: "", ap: "", cp: "", csc: "", userdata: "" }, state.firmware_files) ? prev : state.firmware_files);
+      const name = state.firmware_files.ap ? (state.firmware_files.ap.split(/[/\\]/).pop() || "") : "";
+      setApFileName(prev => prev === name ? prev : name);
     }
-
-    window.setTimeout(() => {
-      applyingSharedState.current = false;
-    }, 0);
   };
 
   useEffect(() => {
-    if (!backendActive || desktopActive) return;
+    if (!backendActive) return;
     let cancelled = false;
     invoke<SharedUiState>("get_shared_ui_state")
       .then(state => {
@@ -374,52 +463,105 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [backendActive, desktopActive]);
+  }, [backendActive]);
 
-  // ponytail: Real-time Event Stream / WebSocket sync for Web client (0ms push latency)
+  useEffect(() => {
+    if (!desktopActive) return;
+    const unlisten = listen<SharedUiState>("shared-ui-updated", (event) => {
+      applySharedUiState(event.payload);
+      sharedUiHydrated.current = true;
+    });
+    return () => {
+      unlisten.then(fn => fn());
+    };
+  }, [desktopActive]);
+
+  // ponytail: Real-time Event Stream / SSE sync for Web client
   useEffect(() => {
     if (desktopActive || !backendActive) return;
-    const bridgeUrl = localStorage.getItem("desktop_bridge_url") || "http://" + window.location.hostname + ":9977";
-    const sseUrl = bridgeUrl + "/events";
+    const host = window.location.hostname || "127.0.0.1";
+    const sseUrl = localStorage.getItem("desktop_bridge_url") || `http://${host}:9977/events`;
     let es: EventSource | null = null;
+    const handleSseMsg = (event: MessageEvent) => {
+      try {
+        const state: SharedUiState = JSON.parse(event.data);
+        applySharedUiState(state);
+        sharedUiHydrated.current = true;
+      } catch { }
+    };
+
     try {
       es = new EventSource(sseUrl);
-      es.onmessage = (event) => {
-        try {
-          const state: SharedUiState = JSON.parse(event.data);
-          applySharedUiState(state);
-          sharedUiHydrated.current = true;
-        } catch { }
-      };
+      es.onmessage = handleSseMsg;
+      es.addEventListener("message", handleSseMsg);
     } catch { }
     return () => {
       es?.close();
     };
   }, [backendActive, desktopActive]);
 
-  // ponytail: one debounced writer; remote applies do not echo back into another save
+  // ponytail: Polling fallback for Web client to ensure instant sync when SSE drops or reconnects
   useEffect(() => {
-    if (!backendActive || desktopActive || !sharedUiHydrated.current || applyingSharedState.current) return;
-    const timer = window.setTimeout(async () => {
-      try {
-        const state = await invoke<SharedUiState>("save_shared_ui_state", {
-          selected_devices: selectedDevices,
-          automation_state: {
-            seq_odin: seqOdin,
-            seq_skip_wz: seqSkipWz,
-            seq_gba: seqGba,
-            seq_wifi: seqWifi,
-            loading,
-            current_step: currentStep,
-            is_stopping: isStopping,
-            logs,
-          },
-        });
-        sharedUiSeenAt.current = state.updated_at_ms;
-      } catch { }
-    }, 200);
-    return () => window.clearTimeout(timer);
-  }, [backendActive, desktopActive, selectedDevices, seqOdin, seqSkipWz, seqGba, seqWifi, loading, currentStep, isStopping, logs]);
+    if (desktopActive || !backendActive) return;
+    const pollState = () => {
+      invoke<SharedUiState>("get_shared_ui_state")
+        .then(state => {
+          applySharedUiState(state);
+          sharedUiHydrated.current = true;
+        })
+        .catch(() => {});
+    };
+    pollState();
+    const interval = window.setInterval(pollState, 1500);
+    return () => window.clearInterval(interval);
+  }, [backendActive, desktopActive]);
+
+  // ponytail: debounced writer for local user changes; guards against echoing remote applies back
+  useEffect(() => {
+    if (!backendActive || !sharedUiHydrated.current) return;
+
+    const currentAuto = {
+      seq_odin: seqOdin,
+      seq_skip_wz: seqSkipWz,
+      seq_gba: seqGba,
+      seq_wifi: seqWifi,
+      loading,
+      current_step: currentStep,
+      is_stopping: isStopping,
+      logs,
+    };
+
+    if (isAutomationStateEqual(currentAuto, lastAppliedAutomationState.current)) return;
+
+    lastAppliedAutomationState.current = currentAuto;
+    lastLocalSaveMs.current = Date.now(); // ponytail: debounce self-echo
+    invoke<SharedUiState>("save_shared_ui_state", {
+      automation_state: currentAuto,
+    }).then(state => {
+      sharedUiSeenAt.current = state.updated_at_ms;
+      if (state.automation_state) {
+        lastAppliedAutomationState.current = state.automation_state;
+      }
+    }).catch(() => {});
+  }, [backendActive, seqOdin, seqSkipWz, seqGba, seqWifi, loading, currentStep, isStopping, logs]);
+
+  // ponytail: writer for local device selection changes to backend
+  useEffect(() => {
+    if (!backendActive || !sharedUiHydrated.current) return;
+    if (sameStringList(selectedDevices, lastSavedSelectedDevices.current)) return;
+
+    lastSavedSelectedDevices.current = selectedDevices;
+
+    lastLocalSaveMs.current = Date.now(); // ponytail: debounce self-echo
+    invoke<SharedUiState>("save_shared_ui_state", {
+      selected_devices: selectedDevices,
+    }).then(state => {
+      sharedUiSeenAt.current = state.updated_at_ms;
+      if (state.selected_devices) {
+        lastSavedSelectedDevices.current = state.selected_devices;
+      }
+    }).catch(() => {});
+  }, [backendActive, selectedDevices]);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1064,9 +1206,15 @@ export default function App() {
     }
   };
 
-  const toggleDevice = (id: string) => {
+  const toggleDevice = (id: string, serial?: string, odinKey?: string, port?: string) => {
     if (busyDevices.includes(id)) return;
-    setSelectedDevices(p => p.includes(id) ? p.filter(d => d !== id) : [...p, id]);
+    const keys = [id, serial, odinKey, port].filter((k): k is string => Boolean(k));
+    setSelectedDevices(prev => {
+      const isCurrentlySelected = keys.some(k => prev.includes(k));
+      return isCurrentlySelected
+        ? prev.filter(item => !keys.includes(item))
+        : Array.from(new Set([...prev, ...keys]));
+    });
   };
 
   const mergedDevices = useMemo<DeviceView[]>(() => {
@@ -1468,8 +1616,10 @@ export default function App() {
                 allSerials={devices}
                 selectedSerials={selectedDevices}
                 setSelectedSerials={setSelectedDevices}
+                odinDevices={odinDeviceStates}
                 onDevicesUpdate={setOdinDeviceStates}
                 sharedVerifyState={sharedVerifyState}
+                sharedFirmwareFiles={sharedFirmwareFiles || undefined}
                 onVerifyProgress={setCurrentVerifyProgress}
                 onVerifyStateChange={(verifying, progress) => {
                   setIsVerifyingMd5(verifying);
@@ -1554,15 +1704,11 @@ export default function App() {
                           const isFlashing = odinData?.status === "Flashing...";
                           const isPass = odinData?.status === "Pass";
                           const isFail = odinData?.status === "Fail";
-                          const isSelected = selectedDevices.includes(id);
+                          const isSelected = selectedDevices.includes(id) ||
+                            Boolean(item.serial && selectedDevices.includes(item.serial)) ||
+                            Boolean(item.odinKey && selectedDevices.includes(item.odinKey));
 
-                          const matchingModel = parseModelFromFirmware(apFileName);
-                          const normalizedMatching = matchingModel ? normalizeModelName(matchingModel) : null;
-                          const normalizedItemModel = normalizeModelName(item.model);
-                          const isModelMatch = Boolean(
-                            normalizedMatching &&
-                            normalizedItemModel.includes(normalizedMatching)
-                          );
+                          const isModelMatch = isFirmwareForModel(apFileName, item.model || "");
 
                           let borderStyle = "";
                           if (busyDevices.includes(id) && !isSelected) {
@@ -1590,7 +1736,7 @@ export default function App() {
                           return (
                             <div
                               key={id}
-                              onClick={() => !busyDevices.includes(id) && toggleDevice(id)}
+                              onClick={() => !busyDevices.includes(id) && toggleDevice(id, item.serial, item.odinKey, item.port)}
                               className={`h-[96px] shrink-0 p-4 rounded-xl border transition-all cursor-pointer relative overflow-hidden ${borderStyle}`}
                             >
                               {isFlashing && odinData && (
@@ -1678,32 +1824,32 @@ export default function App() {
 
                 <div className="flex flex-col gap-4 md:gap-8">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-6">
-                    <div onClick={() => setSeqOdin(!seqOdin)} className={`p-3 md:p-6 border rounded-xl transition-all cursor-pointer flex flex-col items-center justify-center gap-2 md:gap-4 ${seqOdin ? 'border-orange-500 bg-orange-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}>
+                    <div onClick={toggleSeqOdin} className={`p-3 md:p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-2 md:gap-4 ${loading ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${seqOdin ? 'border-orange-500 bg-orange-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}>
                       <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqOdin ? 'bg-orange-500 border-orange-500 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'border-white/20'}`}>
                         {seqOdin && <Check className="w-5 h-5 text-white" strokeWidth={4} />}
                       </div>
                       <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqOdin ? 'text-orange-400' : 'text-white/40'}`}>Odin Flash</span>
                     </div>
-                    <div onClick={() => setSeqSkipWz(!seqSkipWz)} className={`p-6 border rounded-xl transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqSkipWz ? 'border-blue-500 bg-blue-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}>
+                    <div onClick={toggleSeqSkipWz} className={`p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-4 ${loading ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${seqSkipWz ? 'border-blue-500 bg-blue-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}>
                       <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqSkipWz ? 'bg-blue-500 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.5)]' : 'border-white/20'}`}>
                         {seqSkipWz && <Check className="w-5 h-5 text-white" strokeWidth={4} />}
                       </div>
                       <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqSkipWz ? 'text-blue-400' : 'text-white/40'}`}>Skip WZ</span>
                     </div>
-                    <div onClick={() => setSeqGba(!seqGba)} className={`p-6 border rounded-xl transition-all cursor-pointer flex flex-col items-center justify-center gap-4 ${seqGba ? 'border-purple-500 bg-purple-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}>
+                    <div onClick={toggleSeqGba} className={`p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-4 ${loading ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${seqGba ? 'border-purple-500 bg-purple-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}>
                       <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqGba ? 'bg-purple-500 border-purple-500 shadow-[0_0_15px_rgba(168,85,247,0.5)]' : 'border-white/20'}`}>
                         {seqGba && <Check className="w-5 h-5 text-white" strokeWidth={4} />}
                       </div>
                       <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqGba ? 'text-purple-400' : 'text-white/40'}`}>Setup GBA</span>
                     </div>
                     <div
-                      onClick={() => setSeqWifi(!seqWifi)}
+                      onClick={toggleSeqWifi}
                       onContextMenu={(e) => {
                         e.preventDefault();
-                        setShowWifiModal(true);
+                        if (!loading) setShowWifiModal(true);
                       }}
                       title="Klik kiri: Toggle WiFi Connect | Klik kanan: Preset SSID & Password"
-                      className={`p-6 border rounded-xl transition-all cursor-pointer flex flex-col items-center justify-center gap-4 relative group ${seqWifi ? 'border-green-500 bg-green-500/10' : 'border-[#333] bg-black/40 hover:border-white/20'}`}
+                      className={`p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-4 relative group ${loading ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${seqWifi ? 'border-green-500 bg-green-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}
                     >
                       <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqWifi ? 'bg-green-500 border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.5)]' : 'border-white/20'}`}>
                         {seqWifi && <Check className="w-5 h-5 text-white" strokeWidth={4} />}

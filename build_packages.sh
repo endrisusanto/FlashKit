@@ -85,91 +85,69 @@ install_linux_package() {
   deb_file="$(latest_file "$BUNDLE_DIR/deb" "*.deb")"
   rpm_file="$(latest_file "$BUNDLE_DIR/rpm" "*.rpm")"
 
+  echo "Uninstalling existing FlashKit app..."
+  if command -v apt >/dev/null 2>&1; then
+    sudo apt purge -y flash-kit 2>/dev/null || true
+  elif command -v dpkg >/dev/null 2>&1; then
+    sudo dpkg -P flash-kit 2>/dev/null || true
+  fi
+  if command -v dnf >/dev/null 2>&1; then
+    sudo dnf remove -y flash-kit 2>/dev/null || true
+  elif command -v rpm >/dev/null 2>&1; then
+    sudo rpm -e flash-kit 2>/dev/null || true
+  fi
+
+  # Clear active state files during package updates
+  echo "Clearing state files and caches..."
+  rm -f /tmp/flashkit_busy.json /tmp/flashkit_ui_state.json 2>/dev/null || true
+  rm -f "C:\\Windows\\Temp\\flashkit_busy.json" "C:\\Windows\\Temp\\flashkit_ui_state.json" 2>/dev/null || true
+
   if [[ "$LINUX_FAMILY" == "deb" && -n "$deb_file" ]] && command -v apt >/dev/null 2>&1; then
-    local pkg_name pkg_version installed_version
-    pkg_name="$(dpkg-deb -f "$deb_file" Package 2>/dev/null || echo "")"
-    pkg_version="$(dpkg-deb -f "$deb_file" Version 2>/dev/null || echo "")"
-    installed_version="$(dpkg-query -W -f='${Version}' "$pkg_name" 2>/dev/null || echo "")"
-    if [[ -n "$pkg_name" && "$installed_version" == "$pkg_version" ]]; then
-      echo "Installing DEB package (Reinstalling): $deb_file"
-      sudo apt install --reinstall -y "$deb_file"
-    else
-      echo "Installing/Upgrading DEB package: $deb_file"
-      sudo apt install -y "$deb_file"
-    fi
+    echo "Installing fresh DEB package: $deb_file"
+    sudo apt install -y "$deb_file"
     return
   fi
 
   if [[ "$LINUX_FAMILY" == "deb" && -n "$deb_file" ]] && command -v dpkg >/dev/null 2>&1; then
-    echo "Installing DEB package: $deb_file"
+    echo "Installing fresh DEB package: $deb_file"
     sudo dpkg -i "$deb_file" || sudo apt-get install -f -y
     return
   fi
 
   if [[ "$LINUX_FAMILY" == "rpm" && -n "$rpm_file" ]] && command -v dnf >/dev/null 2>&1; then
-    local pkg_full_name
-    pkg_full_name="$(rpm -qp "$rpm_file" 2>/dev/null || echo "")"
-    if [[ -n "$pkg_full_name" ]] && rpm -q "$pkg_full_name" >/dev/null 2>&1; then
-      echo "Installing RPM package (Reinstalling): $rpm_file"
-      sudo dnf reinstall -y "$rpm_file"
-    else
-      echo "Installing/Upgrading RPM package: $rpm_file"
-      sudo dnf install -y "$rpm_file"
-    fi
+    echo "Installing fresh RPM package: $rpm_file"
+    sudo dnf install -y "$rpm_file"
     return
   fi
 
   if [[ "$LINUX_FAMILY" == "rpm" && -n "$rpm_file" ]] && command -v yum >/dev/null 2>&1; then
-    local pkg_full_name
-    pkg_full_name="$(rpm -qp "$rpm_file" 2>/dev/null || echo "")"
-    if [[ -n "$pkg_full_name" ]] && rpm -q "$pkg_full_name" >/dev/null 2>&1; then
-      echo "Installing RPM package (Reinstalling): $rpm_file"
-      sudo yum reinstall -y "$rpm_file"
-    else
-      echo "Installing/Upgrading RPM package: $rpm_file"
-      sudo yum install -y "$rpm_file"
-    fi
+    echo "Installing fresh RPM package: $rpm_file"
+    sudo yum install -y "$rpm_file"
     return
   fi
 
   if [[ "$LINUX_FAMILY" == "rpm" && -n "$rpm_file" ]] && command -v zypper >/dev/null 2>&1; then
-    echo "Installing RPM package: $rpm_file"
+    echo "Installing fresh RPM package: $rpm_file"
     sudo zypper --non-interactive install "$rpm_file"
     return
   fi
 
   if [[ "$LINUX_FAMILY" == "rpm" && -n "$rpm_file" ]] && command -v rpm >/dev/null 2>&1; then
-    echo "Installing RPM package: $rpm_file"
-    sudo rpm -Uvh --replacepkgs "$rpm_file"
+    echo "Installing fresh RPM package: $rpm_file"
+    sudo rpm -ivh "$rpm_file"
     return
   fi
 
   if [[ -z "$LINUX_FAMILY" ]]; then
     if [[ -n "$deb_file" ]] && command -v apt >/dev/null 2>&1; then
-      local pkg_name pkg_version installed_version
-      pkg_name="$(dpkg-deb -f "$deb_file" Package 2>/dev/null || echo "")"
-      pkg_version="$(dpkg-deb -f "$deb_file" Version 2>/dev/null || echo "")"
-      installed_version="$(dpkg-query -W -f='${Version}' "$pkg_name" 2>/dev/null || echo "")"
-      if [[ -n "$pkg_name" && "$installed_version" == "$pkg_version" ]]; then
-        echo "Installing DEB package (Reinstalling): $deb_file"
-        sudo apt install --reinstall -y "$deb_file"
-      else
-        echo "Installing/Upgrading DEB package: $deb_file"
-        sudo apt install -y "$deb_file"
-      fi
+      echo "Installing fresh DEB package: $deb_file"
+      sudo apt install -y "$deb_file"
       return
     fi
 
     if [[ -n "$rpm_file" ]] && command -v dnf >/dev/null 2>&1; then
-      local pkg_full_name
-      pkg_full_name="$(rpm -qp "$rpm_file" 2>/dev/null || echo "")"
-      if [[ -n "$pkg_full_name" ]] && rpm -q "$pkg_full_name" >/dev/null 2>&1; then
-        echo "Installing RPM package (Reinstalling): $rpm_file"
-        sudo dnf reinstall -y "$rpm_file"
-      else
-        echo "Installing/Upgrading RPM package: $rpm_file"
-        sudo dnf install -y "$rpm_file"
-      fi
+      echo "Installing fresh RPM package: $rpm_file"
+      sudo dnf install -y "$rpm_file"
       return
     fi
   fi
