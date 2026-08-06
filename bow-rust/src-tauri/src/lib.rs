@@ -1813,18 +1813,40 @@ fn get_busy_devices() -> Vec<String> {
 fn reset_busy_devices(app: AppHandle) {
     let mut state = read_busy_state();
     state.busy_devices.clear();
+    state.adb_devices.clear();
+    state.updated_at_ms = now_ms();
     write_busy_state(&state);
     emit_busy_state(&app);
+
+    let mut ui_state = read_shared_ui_state();
+    ui_state.odin_devices = serde_json::json!({});
+    ui_state.verify_state = serde_json::json!({});
+    ui_state.updated_at_ms = now_ms();
+    write_shared_ui_state(&ui_state);
+    let _ = app.emit("shared-ui-updated", ui_state.clone());
 }
 
 #[tauri::command]
 fn reset_device_cache(app: AppHandle) -> DeviceCache {
     let mut state = read_busy_state();
     state.adb_devices.clear();
+    state.busy_devices.clear();
     state.updated_at_ms = now_ms();
     write_busy_state(&state);
+
+    let mut ui_state = read_shared_ui_state();
+    ui_state.odin_devices = serde_json::json!({});
+    ui_state.verify_state = serde_json::json!({});
+    ui_state.automation_state.logs.clear();
+    ui_state.automation_state.loading = false;
+    ui_state.automation_state.current_step = None;
+    ui_state.updated_at_ms = now_ms();
+    write_shared_ui_state(&ui_state);
+
     let cache = device_cache_from_state(&state);
     emit_device_cache(&app, cache.clone());
+    emit_busy_state(&app);
+    let _ = app.emit("shared-ui-updated", ui_state.clone());
     cache
 }
 

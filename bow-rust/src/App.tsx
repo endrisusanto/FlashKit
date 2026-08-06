@@ -107,17 +107,25 @@ async function pingDesktopBridge() {
     if (response.ok) return true;
   } catch {}
 
-  // ponytail: fallback direct port 9977 if relative /bridge is not proxied
-  if (!localStorage.getItem("desktop_bridge_url")) {
+  // ponytail: clear stale/broken localStorage saved bridge URL
+  if (localStorage.getItem("desktop_bridge_url") !== null) {
+    localStorage.removeItem("desktop_bridge_url");
     try {
-      const fallbackUrl = "http://" + window.location.hostname + ":9977";
-      const response = await fetch(`${fallbackUrl}/status`, { cache: "no-store" });
-      if (response.ok) {
-        localStorage.setItem("desktop_bridge_url", fallbackUrl);
-        return true;
-      }
+      const response = await fetch("/bridge/status", { cache: "no-store" });
+      if (response.ok) return true;
     } catch {}
   }
+
+  // ponytail: fallback direct port 9977 if relative /bridge is not proxied
+  try {
+    const fallbackUrl = "http://" + window.location.hostname + ":9977";
+    const response = await fetch(`${fallbackUrl}/status`, { cache: "no-store" });
+    if (response.ok) {
+      localStorage.setItem("desktop_bridge_url", fallbackUrl);
+      return true;
+    }
+  } catch {}
+
   return false;
 }
 
@@ -362,7 +370,10 @@ export default function App() {
       }
     } catch { }
     try {
-      await fetch(`${desktopHostUrl()}/reopen`, { method: "POST" });
+      const res = await fetch(`${desktopHostUrl()}/reopen`, { method: "POST" });
+      if (!res.ok) {
+        throw new Error(`Gateway returned status ${res.status}`);
+      }
     } catch {
       window.location.href = "flashkit://open";
     }
@@ -403,8 +414,8 @@ export default function App() {
     if (state.updated_at_ms <= sharedUiSeenAt.current) return;
     sharedUiSeenAt.current = state.updated_at_ms;
 
-    // ponytail: skip automation_state & selected_devices echo from our own save
-    const isSelfEcho = Date.now() - lastLocalSaveMs.current < 150;
+    // ponytail: skip automation_state & selected_devices echo from our own save (1000ms debounce)
+    const isSelfEcho = Date.now() - lastLocalSaveMs.current < 1000;
 
     if (!isSelfEcho) {
       // ponytail: sync selected_devices across all windows & clients
@@ -519,6 +530,8 @@ export default function App() {
   // ponytail: debounced writer for local user changes; guards against echoing remote applies back
   useEffect(() => {
     if (!backendActive || !sharedUiHydrated.current) return;
+    // ponytail: web clients must not overwrite active backend automation state
+    if (!desktopActive && lastAppliedAutomationState.current?.loading && !loading) return;
 
     const currentAuto = {
       seq_odin: seqOdin,

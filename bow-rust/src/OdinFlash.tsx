@@ -461,10 +461,12 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   const resetDeviceMetadata = async () => {
     try {
       await invoke("reset_device_cache");
+      await invoke("reset_busy_devices").catch(() => {});
       Object.keys(localStorage)
         .filter(key => key.startsWith("port_history_"))
         .forEach(key => localStorage.removeItem(key));
       setDevices({});
+      if (onDevicesUpdate) onDevicesUpdate({});
     } catch { }
   };
 
@@ -1087,7 +1089,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   const readyToFlashCount = Object.values(devices).filter(d => d.checked && d.status !== "Flashing...").length;
   const anyFlashing = Object.values(devices).some(d => d.status === "Flashing...");
   const firmwareReadonly = isFlashing;
-  const visibleDevices = Object.entries(devices).filter(([, d]) => d.status !== "Pass");
+  const visibleDevices = Object.entries(devices);
 
   return (
     <div className="odin-container">
