@@ -1148,15 +1148,20 @@ export default function App() {
                 await refreshDevices(true);
                 try {
                   const currentAdb = await invoke<string[]>("get_devices");
-                  // Serial ADB bisa tetap sama setelah flash; cukup cocokkan perangkat yang dikunci.
-                  const newlyBooted = activeSelection.length > 0
-                    ? currentAdb.filter(d => activeSelection.includes(d))
-                    : currentAdb.filter(d => !preFlashAdb.includes(d));
+                  // ponytail: filter out USB port strings from activeSelection to get actual target serial count
+                  const targetSerials = activeSelection.filter(s => !s.startsWith("USB:") && !s.startsWith("/dev/"));
+                  const newlyBooted = targetSerials.length > 0
+                    ? currentAdb.filter(d => targetSerials.includes(d))
+                    : (activeSelection.length > 0
+                        ? currentAdb.filter(d => activeSelection.includes(d))
+                        : currentAdb.filter(d => !preFlashAdb.includes(d)));
+
+                  const requiredCount = targetSerials.length > 0 ? targetSerials.length : (activeSelection.length > 0 ? activeSelection.length : 1);
 
                   if (newlyBooted.length > 0) {
                     setSelectedDevices(newlyBooted);
                     currentSelection = newlyBooted;
-                    if (activeSelection.length === 0 || newlyBooted.length >= activeSelection.length) {
+                    if (newlyBooted.length >= requiredCount) {
                       appendLog(`✓ Semua perangkat target (${newlyBooted.length}) terdeteksi kembali: ${newlyBooted.join(", ")}`);
                       foundNew = true;
                       break;
