@@ -411,9 +411,11 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     cancelFlashing: cancelAllFlashing,
   }));
 
+  const lastSentDevicesRef = useRef<Record<string, DeviceData>>({});
   // Sync devices update back to parent
   useEffect(() => {
-    if (onDevicesUpdate) {
+    if (onDevicesUpdate && !sameDeviceMap(devices, lastSentDevicesRef.current)) {
+      lastSentDevicesRef.current = devices;
       onDevicesUpdate(devices);
     }
   }, [devices, onDevicesUpdate]);
@@ -685,11 +687,13 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
 
   useEffect(() => {
     if (!updateIntervalRef.current) {
-      updateIntervalRef.current = setInterval(() => {
+      updateIntervalRef.current = window.setInterval(() => {
         if (Object.keys(pendingUpdatesRef.current).length > 0) {
           setDevices(prev => {
             let changed = false;
             const next = { ...prev };
+            const toDelete: string[] = [];
+
             for (const dev in pendingUpdatesRef.current) {
               if (next[dev]) {
                 const updates = pendingUpdatesRef.current[dev];
@@ -700,25 +704,27 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                   finalStatus = next[dev].status;
                 }
                 const isPass = finalStatus === "Pass";
-                let targetPct = isPass ? 100 : (updates.progress !== -1 ? updates.progress : next[dev].progress);
-                let currentPct = next[dev].progress || 0;
-                let nextPct = targetPct;
-                if (targetPct > currentPct && !isPass && targetPct < 100) {
-                  nextPct = Math.min(targetPct, currentPct + 4);
-                  if (nextPct < targetPct) {
-                    updates.progress = targetPct;
-                  }
-                }
+                const curPct = next[dev].progress || 0;
+                const incomingPct = isPass ? 100 : (updates.progress !== -1 ? updates.progress : curPct);
+                const nextPct = Math.max(curPct, incomingPct);
+
                 next[dev] = { 
                   ...next[dev], 
                   status: finalStatus,
                   progress: nextPct,
                   log: updates.newLogLines.length > 0 ? `${next[dev].log}\n${updates.newLogLines.join('\n')}` : next[dev].log
                 };
+                toDelete.push(dev);
                 changed = true;
+              } else {
+                toDelete.push(dev);
               }
             }
-            pendingUpdatesRef.current = {};
+
+            for (const dev of toDelete) {
+              delete pendingUpdatesRef.current[dev];
+            }
+
             return changed ? next : prev;
           });
         }
