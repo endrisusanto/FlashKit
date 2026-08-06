@@ -396,7 +396,6 @@ export default function App() {
     if (desktopActive) return;
     let cancelled = false;
     const pollBridge = async () => {
-      if (!isLeader) return;
       try {
         const online = await pingDesktopBridge();
         if (!cancelled) setDesktopBridgeOnline(online);
@@ -518,7 +517,6 @@ export default function App() {
   useEffect(() => {
     if (desktopActive || !backendActive) return;
     const pollState = () => {
-      if (!isLeader) return;
       invoke<SharedUiState>("get_shared_ui_state")
         .then(state => {
           applySharedUiState(state);
@@ -549,6 +547,7 @@ export default function App() {
     };
 
     if (isAutomationStateEqual(currentAuto, lastAppliedAutomationState.current)) return;
+    if (!isLeader) return; // ponytail: only leader can write state automatically
 
     lastAppliedAutomationState.current = currentAuto;
     lastLocalSaveMs.current = Date.now(); // ponytail: debounce self-echo
@@ -566,6 +565,7 @@ export default function App() {
   useEffect(() => {
     if (!backendActive || !sharedUiHydrated.current) return;
     if (sameStringList(selectedDevices, lastSavedSelectedDevices.current)) return;
+    if (!isLeader) return; // ponytail: only leader can write state automatically
 
     lastSavedSelectedDevices.current = selectedDevices;
 
@@ -653,7 +653,6 @@ export default function App() {
   useEffect(() => {
     if (!backendActive) return;
     const poll = async () => {
-      if (!isLeader) return;
       try {
         const [busy, cache] = await Promise.all([
           invoke<string[]>("get_busy_devices"),
@@ -2019,6 +2018,12 @@ export default function App() {
             <div className={`w-2.5 h-2.5 rounded-full ${mergedDevices.length > 0 ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.4)]' : 'bg-white/10'}`} />
             <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{mergedDevices.length} Units Connected</span>
           </div>
+          {isLeader && (
+            <div className="flex items-center gap-1.5 bg-blue-500/10 px-2 py-1 rounded-md border border-blue-500/20">
+              <Wifi className="w-3.5 h-3.5 text-blue-400" />
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400">Online!</span>
+            </div>
+          )}
         </footer>
 
         {!backendActive && (
