@@ -551,8 +551,8 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
               log: `${getTimestamp()} Attached at ${dev}\n${getTimestamp()} Waiting for flash command...`,
             };
           } else {
-            // ponytail: Reset stale "Fail" status back to "Ready" when device is detected in Download mode
-            if (updated[dev].status === "Fail" && !isFlashingRef.current) {
+            // ponytail: Reset stale "Pass", "Fail", or "Flashing..." status back to "Ready" when device is detected in Download mode
+            if (!isFlashingRef.current && (updated[dev].status === "Pass" || updated[dev].status === "Fail" || updated[dev].status === "Flashing..." || updated[dev].progress >= 100)) {
               updated[dev] = {
                 ...updated[dev],
                 status: "Ready",
@@ -654,7 +654,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
               if (next[dev]) {
                 const updates = pendingUpdatesRef.current[dev];
                 let finalStatus = updates.status || next[dev].status;
-                if ((next[dev].status === "Pass" || next[dev].status === "Fail") && updates.status === "Flashing...") {
+                if (isFlashingRef.current && (next[dev].status === "Pass" || next[dev].status === "Fail") && updates.status === "Flashing...") {
                   finalStatus = next[dev].status;
                 }
                 const isPass = next[dev].status === "Pass" || finalStatus === "Pass";
