@@ -1,7 +1,7 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 COPY index.html postcss.config.js tsconfig*.json vite.config.ts ./
 COPY src ./src
 COPY public ./public

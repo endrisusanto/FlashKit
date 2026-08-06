@@ -8,3 +8,14 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+
+  broker:
+    build:
+      context: ./cloud-broker
+    image: bow-flashkit-broker
+    ports:
+      - "9988:9988"
+    environment:
+      - SHARED_SECRET_KEY=flashkit-secure-token-2026
+      - PORT=9988
+    restart: unless-stopped

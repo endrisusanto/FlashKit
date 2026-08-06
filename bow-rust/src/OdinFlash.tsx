@@ -3,6 +3,7 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ShieldAlert, RefreshCw, DatabaseZap, Trash2 } from "lucide-react";
+import { cloudSocket } from "./cloudSocket";
 import "./OdinFlash.css";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -88,17 +89,24 @@ function isTauriRuntime() {
 }
 
 function desktopBridgeUrl() {
+  const saved = localStorage.getItem("desktop_bridge_url");
+  if (saved) return saved;
   return "/bridge";
 }
 
 async function bridgeInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  if (cloudSocket.isActive()) {
+    cloudSocket.sendCommand(command, args);
+    return {} as T;
+  }
+
   const response = await fetch(`${desktopBridgeUrl()}/invoke`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ command, args: args || {} }),
   });
   const payload = await response.json();
-  if (!payload.ok) throw new Error(payload.error || `Bridge command failed: ${command}`);
+  if (!response.ok || !payload.ok) throw new Error(payload.error || `Bridge command failed: ${command}`);
   return payload.value as T;
 }
 
@@ -787,7 +795,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   }, [desktopActive]);
 
   useEffect(() => {
-    if (desktopActive || !isFlashing) return;
+    if (desktopActive || !isFlashing || cloudSocket.isActive()) return;
     const poll = async () => {
       try {
         const response = await fetch(`${desktopBridgeUrl()}/progress?since=${webProgressSeqRef.current}`, { cache: "no-store" });
@@ -835,6 +843,49 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     const interval = window.setInterval(poll, 1000);
     return () => window.clearInterval(interval);
   }, [desktopActive, isFlashing]);
+
+  useEffect(() => {
+    if (!cloudSocket.isActive() || !isFlashing) return;
+
+    const handleProgress = (device: string, line: string) => {
+      setDevices(prev => {
+        const current = prev[device];
+        if (!current || current.status !== "Flashing...") return prev;
+
+        let status: DeviceData["status"] = current.status;
+        let progress = current.progress;
+        let parsedLine = line;
+        if (parsedLine.startsWith("STATUS:Pass:")) {
+          status = "Pass";
+          progress = 100;
+          parsedLine = parsedLine.replace("STATUS:Pass:", "");
+        } else if (parsedLine.startsWith("STATUS:Fail:")) {
+          status = "Fail";
+          parsedLine = `ERROR: ${parsedLine.replace("STATUS:Fail:", "")}`;
+        } else {
+          const pctMatch = parsedLine.match(/\((\d+)%\)/g);
+          if (pctMatch) {
+            progress = parseInt(pctMatch[pctMatch.length - 1].replace(/\D/g, ""), 10);
+            parsedLine = parsedLine.replace(/\(\d+%\)/g, "").trim();
+          }
+        }
+        return {
+          ...prev,
+          [device]: {
+            ...current,
+            status,
+            progress,
+            log: parsedLine ? `${current.log}\n${getTimestamp()} ${parsedLine}` : current.log,
+          }
+        };
+      });
+    };
+
+    cloudSocket.on('progress', handleProgress);
+    return () => {
+      cloudSocket.off('progress', handleProgress);
+    };
+  }, [isFlashing]);
   // ── File selection & verification ────────────────────────────────────
 
   async function openServerFilePicker(slot: SlotKey, path = "/run/media/endri-pro") {

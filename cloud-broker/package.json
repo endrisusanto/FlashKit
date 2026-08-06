@@ -1,0 +1,20 @@
+{
+  "name": "flashkit-cloud-broker",
+  "version": "1.0.0",
+  "description": "WebSocket Broker for FlashKit Cloud Workstation Dashboard",
+  "main": "dist/server.js",
+  "scripts": {
+    "start": "node dist/server.js",
+    "build": "tsc",
+    "dev": "ts-node src/server.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}

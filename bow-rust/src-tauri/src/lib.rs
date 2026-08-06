@@ -16,6 +16,9 @@ use tauri::{AppHandle, Emitter, WebviewWindow, WindowEvent};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
+mod agent_ws;
+use agent_ws::{run_cloud_agent_loop, send_to_cloud_ws};
+
 async fn run_blocking<T, F>(task_name: &'static str, task: F) -> Result<T, String>
 where
     T: Send + 'static,
@@ -126,6 +129,13 @@ fn broadcast_shared_ui_state(state: &SharedUiState) {
     }
     if let Ok(serialized) = serde_json::to_string(&IpcMessage::SharedUiState { state: state.clone() }) {
         send_ipc(serialized);
+    }
+    let cloud_msg = serde_json::json!({
+        "type": "shared_ui_state",
+        "state": state
+    });
+    if let Ok(msg_str) = serde_json::to_string(&cloud_msg) {
+        send_to_cloud_ws(msg_str);
     }
 }
 
@@ -253,6 +263,14 @@ fn broadcast_progress(device_id: &str, line: &str) {
     }
     if let Ok(serialized) = serde_json::to_string(&msg) {
         send_ipc(serialized);
+    }
+    let cloud_msg = serde_json::json!({
+        "type": "progress",
+        "device": device_id,
+        "line": line
+    });
+    if let Ok(msg_str) = serde_json::to_string(&cloud_msg) {
+        send_to_cloud_ws(msg_str);
     }
 }
 
@@ -1958,6 +1976,10 @@ pub fn run() {
             let bridge_handle = app.handle().clone();
             thread::spawn(move || {
                 run_web_bridge(bridge_handle);
+            });
+            let agent_handle = app.handle().clone();
+            thread::spawn(move || {
+                run_cloud_agent_loop(agent_handle);
             });
             Ok(())
         })

@@ -1,6 +1,6 @@
 [package]
 name = "flashkit"
-version = "1.8.42"
+version = "1.8.43"
 description = "FlashKit - Device Provisioning Tool"
 authors = ["you"]
 edition = "2021"
@@ -25,3 +25,6 @@ tauri-plugin-deep-link = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serialport = "4.3.0"
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["full"] }

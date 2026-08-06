@@ -3,6 +3,7 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X, Download, ShieldAlert, DatabaseZap, FileText } from "lucide-react";
 import OdinFlash, { OdinFlashRef, DeviceData, SharedFirmwareFiles } from "./OdinFlash";
+import { cloudSocket } from "./cloudSocket";
 import logo from './assets/logo.png';
 import confetti from 'canvas-confetti';
 
@@ -126,6 +127,11 @@ function desktopHostUrl() {
 }
 
 async function bridgeInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  if (cloudSocket.isActive()) {
+    cloudSocket.sendCommand(command, args);
+    return {} as T;
+  }
+
   const response = await fetch(`${desktopBridgeUrl()}/invoke`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -228,7 +234,7 @@ const startConfettiLoop = (onStop?: () => void) => {
   }, 500);
 };
 
-export default function App() {
+export default function App({ overrideBridgeUrl }: { overrideBridgeUrl?: string }) {
   const [desktopActive, setDesktopActive] = useState(isTauriRuntime());
   const [desktopBridgeOnline, setDesktopBridgeOnline] = useState(false);
   const [devices, setDevices] = useState<string[]>([]);
@@ -283,6 +289,37 @@ export default function App() {
   const invoke = async <T,>(command: string, args?: Record<string, unknown>) => {
     return desktopActive ? tauriInvoke<T>(command, args) : bridgeInvoke<T>(command, args);
   };
+
+  useEffect(() => {
+    if (desktopActive) {
+      cloudSocket.disconnect();
+      return;
+    }
+    const token = localStorage.getItem("fk_global_token") || "flashkit-secure-token-2026";
+    const bridgeUrl = overrideBridgeUrl || desktopBridgeUrl();
+    
+    // Write bridge url to localStorage so child components access it
+    localStorage.setItem("desktop_bridge_url", bridgeUrl);
+
+    // Setup Cloud Socket (will connect if it is a ws/wss URL)
+    cloudSocket.setup(bridgeUrl, token);
+
+    const onStatus = (status: string) => {
+      setDesktopBridgeOnline(status === 'Online');
+    };
+    const onState = (state: SharedUiState) => {
+      applySharedUiState(state);
+      sharedUiHydrated.current = true;
+    };
+
+    cloudSocket.on('status', onStatus);
+    cloudSocket.on('shared_ui_state', onState);
+
+    return () => {
+      cloudSocket.off('status', onStatus);
+      cloudSocket.off('shared_ui_state', onState);
+    };
+  }, [overrideBridgeUrl, desktopActive]);
 
   useEffect(() => {
     if (backendActive) {
@@ -357,12 +394,13 @@ export default function App() {
       const online = await pingDesktopBridge();
       setDesktopBridgeOnline(online);
       if (online) {
-        await fetch(`${desktopBridgeUrl()}/focus`, { method: "POST" });
-        return;
+        const res = await fetch(`${desktopBridgeUrl()}/focus`, { method: "POST" });
+        if (res.ok) return;
       }
     } catch { }
     try {
-      await fetch(`${desktopHostUrl()}/reopen`, { method: "POST" });
+      const res = await fetch(`${desktopHostUrl()}/reopen`, { method: "POST" });
+      if (!res.ok) throw new Error("Host daemon offline");
     } catch {
       window.location.href = "flashkit://open";
     }
@@ -380,7 +418,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (desktopActive) return;
+    if (desktopActive || cloudSocket.isActive()) return;
     let cancelled = false;
     const pollBridge = async () => {
       try {
@@ -478,7 +516,7 @@ export default function App() {
 
   // ponytail: Real-time Event Stream / SSE sync for Web client
   useEffect(() => {
-    if (desktopActive || !backendActive) return;
+    if (desktopActive || !backendActive || cloudSocket.isActive()) return;
     const host = window.location.hostname || "127.0.0.1";
     const sseUrl = localStorage.getItem("desktop_bridge_url") || `http://${host}:9977/events`;
     let es: EventSource | null = null;
@@ -502,7 +540,7 @@ export default function App() {
 
   // ponytail: Polling fallback for Web client to ensure instant sync when SSE drops or reconnects
   useEffect(() => {
-    if (desktopActive || !backendActive) return;
+    if (desktopActive || !backendActive || cloudSocket.isActive()) return;
     const pollState = () => {
       invoke<SharedUiState>("get_shared_ui_state")
         .then(state => {
