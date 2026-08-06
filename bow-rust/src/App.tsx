@@ -1642,6 +1642,7 @@ export default function App() {
             {backendActive && (
               <OdinFlash
                 ref={odinRef}
+                isLeader={isLeader}
                 allSerials={devices}
                 selectedSerials={selectedDevices}
                 setSelectedSerials={setSelectedDevices}
