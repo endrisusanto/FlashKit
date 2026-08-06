@@ -505,7 +505,10 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
           const isCurrentAdb = serial ? allSerialsRef.current?.includes(serial) : false;
 
           if (!isCurrentOdin && !isCurrentAdb && !isFlashingRef.current) {
-            delete updated[key];
+            // ponytail: Do not delete devices in "Pass" status while waiting for device bootup
+            if (updated[key].status !== "Pass") {
+              delete updated[key];
+            }
           }
         }
 
@@ -683,10 +686,19 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                   finalStatus = next[dev].status;
                 }
                 const isPass = finalStatus === "Pass";
+                let targetPct = isPass ? 100 : (updates.progress !== -1 ? updates.progress : next[dev].progress);
+                let currentPct = next[dev].progress || 0;
+                let nextPct = targetPct;
+                if (targetPct > currentPct && !isPass && targetPct < 100) {
+                  nextPct = Math.min(targetPct, currentPct + 4);
+                  if (nextPct < targetPct) {
+                    updates.progress = targetPct;
+                  }
+                }
                 next[dev] = { 
                   ...next[dev], 
                   status: finalStatus,
-                  progress: isPass ? 100 : (updates.progress !== -1 ? updates.progress : next[dev].progress),
+                  progress: nextPct,
                   log: updates.newLogLines.length > 0 ? `${next[dev].log}\n${updates.newLogLines.join('\n')}` : next[dev].log
                 };
                 changed = true;
@@ -1202,7 +1214,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                       data.status === "Flashing..." ? "dev-status-flashing" :
                       "dev-status-ready"
                     }>
-                      {data.status === "Pass" ? "Odin Completed, Wait for Device BootUp!" : data.status}
+                      {data.status === "Pass" ? "Odin Completed!" : data.status}
                     </span>
                   </h3>
                   <p className="dev-path">
