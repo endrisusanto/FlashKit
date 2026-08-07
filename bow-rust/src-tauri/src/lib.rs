@@ -656,11 +656,21 @@ fn bridge_invoke(app: AppHandle, payload: BridgeInvokeRequest) -> String {
         "odin_check_file" => {
             let path = bridge_arg_string(&payload.args, "path");
             let slot = bridge_arg_string(&payload.args, "slot");
-            bridge_result(path.and_then(|path| slot.and_then(|slot| bridge_window(&app).and_then(|window| odin_check_file_blocking(app, window, path, slot)))))
+            let window = bridge_window(&app).ok();
+            bridge_result(path.and_then(|path| slot.and_then(|slot| odin_check_file_blocking(app, window, path, slot))))
         }
         "odin_flash_device" => {
             let params = serde_json::from_value::<FlashParams>(payload.args.get("params").cloned().unwrap_or_default()).map_err(|e| e.to_string());
-            bridge_result(params.and_then(|params| bridge_window(&app).and_then(|window| odin_flash_device_blocking(app, window, params))))
+            let window = bridge_window(&app).ok();
+            if let Ok(params) = params {
+                let app_clone = app.clone();
+                thread::spawn(move || {
+                    let _ = odin_flash_device_blocking(app_clone, window, params);
+                });
+                bridge_ok("Odin flash started in background".to_string())
+            } else {
+                serde_json::json!({ "ok": false, "error": "Invalid flash params" }).to_string()
+            }
         }
         "emergency_stop" => bridge_result(emergency_stop_blocking()),
         "list_server_files" => bridge_result(list_server_files(payload.args.get("path").and_then(|value| value.as_str()).map(str::to_string))),
@@ -932,14 +942,14 @@ async fn odin_flash_device(
     window: WebviewWindow,
     params: FlashParams,
 ) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || odin_flash_device_blocking(app, window, params))
+    tauri::async_runtime::spawn_blocking(move || odin_flash_device_blocking(app, Some(window), params))
         .await
         .map_err(|e| format!("Odin flash task failed: {}", e))?
 }
 
 fn odin_flash_device_blocking(
     app: AppHandle,
-    window: WebviewWindow,
+    window: Option<WebviewWindow>,
     params: FlashParams,
 ) -> Result<String, String> {
     let binary = get_odin_binary(&app);
@@ -1022,7 +1032,9 @@ fn odin_flash_device_blocking(
                 let pct = extract_percentage(&line).unwrap_or(last_emitted_pct);
                 let now = now_ms();
 
-                let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
+                if let Some(w) = &window {
+                    let _ = w.emit(&format!("flash-progress-{}", device_id), line.clone());
+                }
                 broadcast_progress(&device_id, &line);
 
                 if pct != last_emitted_pct || now >= last_emitted_ms + 100 {
@@ -1044,7 +1056,9 @@ fn odin_flash_device_blocking(
             is_odin_success = true;
         }
         let pct = extract_percentage(&line).unwrap_or(last_emitted_pct);
-        let _ = window.emit(&format!("flash-progress-{}", device_id), line.clone());
+        if let Some(w) = &window {
+            let _ = w.emit(&format!("flash-progress-{}", device_id), line.clone());
+        }
         broadcast_progress(&device_id, &line);
         update_odin_device_progress(&device_id, pct, Some("Flashing..."));
     }
@@ -1083,14 +1097,14 @@ async fn odin_check_file(
     path: String,
     slot: String,
 ) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || odin_check_file_blocking(app, window, path, slot))
+    tauri::async_runtime::spawn_blocking(move || odin_check_file_blocking(app, Some(window), path, slot))
         .await
         .map_err(|e| format!("Odin check task failed: {}", e))?
 }
 
 fn odin_check_file_blocking(
     app: AppHandle,
-    window: WebviewWindow,
+    window: Option<WebviewWindow>,
     path: String,
     slot: String,
 ) -> Result<String, String> {
@@ -1145,7 +1159,9 @@ fn odin_check_file_blocking(
                     if let Some(pct) = extract_percentage(&line) {
                         let now = now_ms();
                         if pct != last_emitted_pct {
-                            let _ = window.emit(&format!("md5-progress-{}", slot), line.clone());
+                            if let Some(w) = &window {
+                                let _ = w.emit(&format!("md5-progress-{}", slot), line.clone());
+                            }
                         }
                         if pct == 100 || pct >= last_emitted_pct + 3 || now >= last_emitted_ms + 150 {
                             last_emitted_pct = pct;
@@ -1153,7 +1169,9 @@ fn odin_check_file_blocking(
                             update_verify_state(&slot, &format!("Verifying MD5... {}% ({})", pct, fname), pct, true);
                         }
                     } else {
-                        let _ = window.emit(&format!("md5-progress-{}", slot), line.clone());
+                        if let Some(w) = &window {
+                            let _ = w.emit(&format!("md5-progress-{}", slot), line.clone());
+                        }
                     }
                     buffer.clear();
                 }
@@ -1165,10 +1183,14 @@ fn odin_check_file_blocking(
         if !buffer.is_empty() {
             let line = String::from_utf8_lossy(&buffer).to_string();
             if let Some(pct) = extract_percentage(&line) {
-                let _ = window.emit(&format!("md5-progress-{}", slot), line.clone());
+                if let Some(w) = &window {
+                    let _ = w.emit(&format!("md5-progress-{}", slot), line.clone());
+                }
                 update_verify_state(&slot, &format!("Verifying MD5... {}% ({})", pct, fname), pct, true);
             } else {
-                let _ = window.emit(&format!("md5-progress-{}", slot), line.clone());
+                if let Some(w) = &window {
+                    let _ = w.emit(&format!("md5-progress-{}", slot), line.clone());
+                }
             }
         }
     }

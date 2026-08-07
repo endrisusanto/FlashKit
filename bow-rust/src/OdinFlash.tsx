@@ -324,14 +324,8 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     },
     hasCheckedDevices: () => {
       const sel = selectedSerialsRef.current || [];
-      const devEntries = Object.entries(devicesRef.current);
-      if (devEntries.length === 0 && sel.length > 0) return true;
-      return devEntries.some(([key, d]) => 
-        d.checked || 
-        sel.includes(key) || 
-        (d.port && sel.includes(d.port)) || 
-        (d.serial && sel.includes(d.serial))
-      );
+      if (sel.length > 0) return true;
+      return Object.values(devicesRef.current).some(d => d.checked);
     },
     refreshDevices: async () => {
       await forceRefresh();

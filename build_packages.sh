@@ -179,3 +179,8 @@ else
   echo "Auto install is not configured for $OS_TYPE."
   echo "Packages are in: $BUNDLE_DIR"
 fi
+
+if command -v docker >/dev/null 2>&1; then
+  echo "Rebuilding Docker Web container..."
+  (cd "$SCRIPT_DIR" && docker compose build web && docker compose up -d) || true
+fi
