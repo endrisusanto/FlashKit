@@ -840,11 +840,12 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   }, [desktopActive, isFlashing]);
   // ── File selection & verification ────────────────────────────────────
 
-  async function openServerFilePicker(slot: SlotKey, path = "/run/media/endri-pro") {
+  async function openServerFilePicker(slot: SlotKey, path = "") {
     setFilePicker({ slot, path, entries: [], loading: true });
     try {
-      const entries = await invoke<ServerFileEntry[]>("list_server_files", { path });
-      setFilePicker({ slot, path, entries, loading: false });
+      const entries = await invoke<ServerFileEntry[]>("list_server_files", path ? { path } : {});
+      const actualPath = entries.length > 0 ? entries[0].path.split(/[/\\]/).slice(0, -1).join("/") || "/" : path;
+      setFilePicker({ slot, path: actualPath, entries, loading: false });
     } catch (e) {
       alert(`Gagal baca folder server:\n${e}`);
       setFilePicker(null);
@@ -852,9 +853,9 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   }
 
   function parentServerPath(path: string) {
-    if (path === "/run/media/endri-pro") return path;
-    const parent = path.replace(/\/+$/, "").split("/").slice(0, -1).join("/") || "/run/media/endri-pro";
-    return parent.startsWith("/run/media/endri-pro") ? parent : "/run/media/endri-pro";
+    if (!path || path === "/") return "/";
+    const parent = path.replace(/\/+$/, "").split("/").slice(0, -1).join("/") || "/";
+    return parent;
   }
 
   async function selectFile(slot: SlotKey) {

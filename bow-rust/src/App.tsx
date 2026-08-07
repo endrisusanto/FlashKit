@@ -4,6 +4,7 @@ import { useLeaderElection } from "./hooks/useLeaderElection";
 import { listen } from "@tauri-apps/api/event";
 import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X, Download, ShieldAlert, DatabaseZap, FileText } from "lucide-react";
 import OdinFlash, { OdinFlashRef, DeviceData, SharedFirmwareFiles } from "./OdinFlash";
+import { WorkstationSelector, WorkstationNode } from "./components/WorkstationSelector";
 import logo from './assets/logo.png';
 import confetti from 'canvas-confetti';
 
@@ -236,6 +237,10 @@ export default function App() {
   const [devices, setDevices] = useState<string[]>([]);
   const [deviceDetails, setDeviceDetails] = useState<Record<string, any>>({});
   const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
+  const [selectedNodeId, setSelectedNodeId] = useState<string>("local");
+  const [customNodeName, setCustomNodeName] = useState<string>(() => localStorage.getItem("flashkit_custom_workstation_name") || "");
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [tempNodeName, setTempNodeName] = useState("");
   const [busyDevices, setBusyDevices] = useState<string[]>([]);
   const [odinDeviceStates, setOdinDeviceStates] = useState<Record<string, DeviceData>>({});
   const [isVerifyingMd5, setIsVerifyingMd5] = useState(false);
@@ -1362,6 +1367,10 @@ export default function App() {
     [mergedDevices, busyDevices]
   );
 
+  const workstationNodes = useMemo<WorkstationNode[]>(() => [
+    { id: "local", name: "Local Workstation", deviceCount: mergedDevices.length, isOnline: true },
+  ], [mergedDevices.length]);
+
   // ponytail: Keep selectedDevices intact across transient USB disconnects/reboots during automation
   useEffect(() => {
     // Keep selected items intact across transient disconnects/reboots
@@ -1622,13 +1631,20 @@ export default function App() {
         )}
 
         {/* ── NAVBAR ── */}
-        <header className="flex md:grid md:grid-cols-[1fr_auto_1fr] justify-center md:justify-between items-center px-2 md:px-8 h-16 md:h-20 bg-[#0d0d0d] border-b border-[#222] shrink-0 gap-3" data-tauri-drag-region>
-          <div className="hidden md:block justify-self-start" />
-          <div className="flex h-full gap-2 md:gap-4 shrink-0 overflow-x-auto custom-scrollbar no-scrollbar w-full md:w-auto justify-center">
+        <header className="flex justify-between items-center px-2 sm:px-4 md:px-8 h-14 sm:h-16 md:h-20 bg-[#0d0d0d] border-b border-[#222] shrink-0 gap-1.5 sm:gap-3 relative z-[99999]" data-tauri-drag-region>
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <WorkstationSelector
+              nodes={workstationNodes}
+              selectedNodeId={selectedNodeId}
+              customNodeName={customNodeName}
+              onSelectNode={setSelectedNodeId}
+            />
+          </div>
+          <div className="flex h-full gap-1 sm:gap-2 md:gap-4 shrink-0 justify-end items-center">
             <button
               id="tab-provisioning"
               onClick={() => setActiveTab("provisioning")}
-              className={`h-full px-3 sm:px-6 md:px-12 text-[10px] sm:text-[11px] md:text-[13px] font-black uppercase tracking-[0.05em] sm:tracking-[0.1em] md:tracking-[0.2em] border-b-[3px] transition-all ${activeTab === "provisioning"
+              className={`h-full px-2 sm:px-6 md:px-12 text-[9px] sm:text-[11px] md:text-[13px] font-black uppercase tracking-[0.03em] sm:tracking-[0.1em] md:tracking-[0.2em] border-b-[3px] transition-all whitespace-nowrap ${activeTab === "provisioning"
                 ? "border-white text-white bg-white/[0.02]"
                 : "border-transparent text-white/30 hover:text-white/60 hover:bg-white/[0.01]"
                 }`}
@@ -1638,7 +1654,7 @@ export default function App() {
             <button
               id="tab-odin"
               onClick={() => setActiveTab("odin")}
-              className={`h-full px-3 sm:px-6 md:px-12 text-[10px] sm:text-[11px] md:text-[13px] font-black uppercase tracking-[0.05em] sm:tracking-[0.1em] md:tracking-[0.2em] border-b-[3px] transition-all relative overflow-hidden ${activeTab === "odin"
+              className={`h-full px-2 sm:px-6 md:px-12 text-[9px] sm:text-[11px] md:text-[13px] font-black uppercase tracking-[0.03em] sm:tracking-[0.1em] md:tracking-[0.2em] border-b-[3px] transition-all relative overflow-hidden whitespace-nowrap ${activeTab === "odin"
                 ? (isOdinFlashingState ? "border-green-500 text-green-400 bg-green-500/[0.02]" : "border-blue-500 text-blue-400 bg-blue-500/[0.02]")
                 : "border-transparent text-white/30 hover:text-white/60 hover:bg-white/[0.01]"
                 }`}
@@ -2055,11 +2071,18 @@ export default function App() {
             <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{mergedDevices.length} Units Connected</span>
           </div>
           {isLeader && (
-            <div className="flex items-center gap-1 md:gap-1.5 bg-blue-500/10 px-1.5 md:px-2 py-1 rounded-md border border-blue-500/20 shrink-0">
-              <Wifi className="w-3.5 h-3.5 text-blue-400" />
+            <button
+              onClick={() => {
+                setTempNodeName(customNodeName || "Local Workstation");
+                setShowRenameModal(true);
+              }}
+              title="Klik untuk ubah nama Workstation"
+              className="flex items-center gap-1 md:gap-1.5 bg-blue-500/10 hover:bg-blue-500/20 px-1.5 md:px-2 py-1 rounded-md border border-blue-500/20 shrink-0 transition-all cursor-pointer group"
+            >
+              <Wifi className="w-3.5 h-3.5 text-blue-400 animate-pulse shrink-0" />
               <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-wider text-blue-400 hidden sm:inline-block">Online!</span>
               <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-wider text-blue-400 sm:hidden">ON</span>
-            </div>
+            </button>
           )}
         </footer>
 
@@ -2087,6 +2110,70 @@ export default function App() {
           </div>
         )}
 
+        {/* Toast Modal for Custom Workstation Node Name */}
+        {showRenameModal && (
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[9999999] flex items-center justify-center p-4">
+            <div className="bg-[#161616] border border-[#333] rounded-2xl p-5 max-w-sm w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-xs font-bold text-white flex items-center gap-2 uppercase tracking-wider">
+                  ✏️ Ubah Nama Workstation
+                </h3>
+                <button
+                  onClick={() => setShowRenameModal(false)}
+                  className="text-white/40 hover:text-white text-xs font-bold px-2 py-1"
+                >
+                  ✕
+                </button>
+              </div>
+              <p className="text-[11px] text-white/50 mb-4 leading-relaxed">
+                Masukkan nama custom untuk workstation node ini (tersimpan di browser).
+              </p>
+              <input
+                type="text"
+                value={tempNodeName}
+                onChange={(e) => setTempNodeName(e.target.value)}
+                placeholder="Contoh: Workstation Meja 1"
+                className="w-full px-3 py-2 bg-[#0c0c0c] border border-[#333] focus:border-emerald-500 rounded-xl text-xs text-white outline-none mb-5 font-medium"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const trimmed = tempNodeName.trim();
+                    setCustomNodeName(trimmed);
+                    if (trimmed) {
+                      localStorage.setItem("flashkit_custom_workstation_name", trimmed);
+                    } else {
+                      localStorage.removeItem("flashkit_custom_workstation_name");
+                    }
+                    setShowRenameModal(false);
+                  }
+                }}
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setShowRenameModal(false)}
+                  className="px-4 py-2 bg-[#252525] hover:bg-[#303030] text-white/70 rounded-xl text-xs font-semibold"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={() => {
+                    const trimmed = tempNodeName.trim();
+                    setCustomNodeName(trimmed);
+                    if (trimmed) {
+                      localStorage.setItem("flashkit_custom_workstation_name", trimmed);
+                    } else {
+                      localStorage.removeItem("flashkit_custom_workstation_name");
+                    }
+                    setShowRenameModal(false);
+                  }}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)]"
+                >
+                  Simpan Nama
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

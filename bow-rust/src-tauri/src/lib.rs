@@ -571,17 +571,36 @@ fn bridge_arg_string(args: &serde_json::Value, key: &str) -> Result<String, Stri
         .ok_or_else(|| format!("Missing {key}"))
 }
 
+fn get_media_base_dir() -> PathBuf {
+    if let Ok(user) = std::env::var("USER") {
+        if !user.is_empty() {
+            let run_media = PathBuf::from(format!("/run/media/{user}"));
+            if run_media.exists() {
+                return run_media;
+            }
+            let media = PathBuf::from(format!("/media/{user}"));
+            if media.exists() {
+                return media;
+            }
+        }
+    }
+    let media = PathBuf::from("/media");
+    if media.exists() {
+        return media;
+    }
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/"))
+}
+
 fn list_server_files(path: Option<String>) -> Result<Vec<BridgeFileEntry>, String> {
-    let base = Path::new("/run/media/endri-pro")
-        .canonicalize()
-        .map_err(|e| format!("/run/media/endri-pro: {e}"))?;
-    let requested = path.unwrap_or_else(|| base.to_string_lossy().to_string());
-    let requested = PathBuf::from(requested)
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
+    let base = get_media_base_dir();
+    let requested = path.filter(|p| !p.is_empty()).map(PathBuf::from).unwrap_or_else(|| base.clone());
+    let requested = requested.canonicalize().map_err(|e| e.to_string())?;
 
     if !requested.starts_with(&base) {
-        return Err("Path outside /run/media/endri-pro".to_string());
+        return Err(format!("Path outside base directory: {}", base.display()));
     }
 
     let mut entries = Vec::new();
@@ -1349,11 +1368,15 @@ fn find_adb() -> String {
     };
 
     #[cfg(not(target_os = "windows"))]
-    let system_paths: Vec<PathBuf> = vec![
-        PathBuf::from("/home/endri-pro/Android/Sdk/platform-tools/adb"),
-        PathBuf::from("/usr/bin/adb"),
-        PathBuf::from("/usr/local/bin/adb"),
-    ];
+    let system_paths: Vec<PathBuf> = {
+        let mut paths = Vec::new();
+        if let Ok(home) = std::env::var("HOME") {
+            paths.push(PathBuf::from(format!("{home}/Android/Sdk/platform-tools/adb")));
+        }
+        paths.push(PathBuf::from("/usr/bin/adb"));
+        paths.push(PathBuf::from("/usr/local/bin/adb"));
+        paths
+    };
 
     for path in system_paths {
         if path.exists() {
