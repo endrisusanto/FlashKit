@@ -1,14 +1,39 @@
 import { useState, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 /**
  * A hook that implements Leader Election across browser tabs/windows using BroadcastChannel.
- * Only one instance (tab/window) will be the "leader" at any given time.
- * If the leader tab is closed, another tab will automatically become the new leader.
+ * Also coordinates with the Rust backend to ensure only one OS process is the leader.
  */
 export function useLeaderElection(channelName = "flashkit-leader-election") {
   const [isLeader, setIsLeader] = useState<boolean>(false);
+  const [isBackendLeader, setIsBackendLeader] = useState<boolean>(true);
 
+  // 1. Determine if our backend is the leader
   useEffect(() => {
+    if (!(window as any).__TAURI_INTERNALS__) {
+      setIsBackendLeader(true);
+      return;
+    }
+
+    const checkBackendLeader = () => {
+      invoke<boolean>("is_bridge_leader")
+        .then(res => setIsBackendLeader(res))
+        .catch(() => setIsBackendLeader(false));
+    };
+
+    checkBackendLeader();
+    const interval = setInterval(checkBackendLeader, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // 2. Tab election (only if we are the backend leader)
+  useEffect(() => {
+    if (!isBackendLeader) {
+      setIsLeader(false);
+      return;
+    }
+
     const channel = new BroadcastChannel(channelName);
     const id = Math.random().toString(36).substring(2, 11);
     let heartbeatInterval: number;
@@ -19,20 +44,14 @@ export function useLeaderElection(channelName = "flashkit-leader-election") {
     channel.onmessage = (event) => {
       const { type } = event.data;
       if (type === "HEARTBEAT") {
-        // We received a heartbeat from a leader.
-        // We are definitely not the leader.
         if (amILeader) {
-          // Conflict resolution: if we thought we were leader, step down
           amILeader = false;
           setIsLeader(false);
           clearInterval(heartbeatInterval);
         }
-        
-        // Reset our timeout that checks if the leader died
         clearTimeout(checkLeaderTimeout);
         startFollowerTimer();
       } else if (type === "NEW_LEADER") {
-        // Someone else just became the leader
         if (amILeader) {
           amILeader = false;
           setIsLeader(false);
@@ -47,7 +66,7 @@ export function useLeaderElection(channelName = "flashkit-leader-election") {
       amILeader = true;
       setIsLeader(true);
       channel.postMessage({ type: "NEW_LEADER", id });
-      
+
       // Send regular heartbeats
       heartbeatInterval = window.setInterval(() => {
         channel.postMessage({ type: "HEARTBEAT", id });
@@ -55,8 +74,6 @@ export function useLeaderElection(channelName = "flashkit-leader-election") {
     };
 
     const startFollowerTimer = () => {
-      // If we don't hear a heartbeat for 2.5 seconds, assume leader is dead
-      // Add a small random jitter to prevent multiple followers from electing themselves at the exact same millisecond
       const timeoutDuration = 2500 + Math.random() * 500;
       checkLeaderTimeout = window.setTimeout(() => {
         if (!amILeader) {
@@ -65,8 +82,6 @@ export function useLeaderElection(channelName = "flashkit-leader-election") {
       }, timeoutDuration);
     };
 
-    // When we first load, wait a short moment to see if there's an existing leader.
-    // If we hear nothing, we become the leader.
     const initialWaitDuration = 500 + Math.random() * 500;
     checkLeaderTimeout = window.setTimeout(() => {
       assumeLeadership();
@@ -77,7 +92,7 @@ export function useLeaderElection(channelName = "flashkit-leader-election") {
       clearInterval(heartbeatInterval);
       clearTimeout(checkLeaderTimeout);
     };
-  }, [channelName]);
+  }, [channelName, isBackendLeader]);
 
   return isLeader;
 }

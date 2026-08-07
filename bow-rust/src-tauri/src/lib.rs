@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::io::{BufRead, BufReader, Read};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -114,6 +115,12 @@ static WEB_PROGRESS: Mutex<Vec<WebProgressMessage>> = Mutex::new(Vec::new());
 static WEB_PROGRESS_SEQ: Mutex<u64> = Mutex::new(0);
 static WEB_SSE_STREAMS: Mutex<Vec<TcpStream>> = Mutex::new(Vec::new());
 static SHARED_UI_MEMORY_STATE: Mutex<Option<SharedUiState>> = Mutex::new(None);
+static IS_BRIDGE_LEADER: AtomicBool = AtomicBool::new(false);
+
+#[tauri::command]
+fn is_bridge_leader() -> bool {
+    IS_BRIDGE_LEADER.load(Ordering::Relaxed)
+}
 
 fn broadcast_shared_ui_state(state: &SharedUiState) {
     let Ok(json) = serde_json::to_string(state) else { return; };
@@ -430,15 +437,20 @@ struct BridgeFileEntry {
 }
 
 fn run_web_bridge(app: AppHandle) {
-    let listener = match TcpListener::bind("0.0.0.0:9977") {
-        Ok(listener) => listener,
-        Err(_) => return,
-    };
-
-    for stream in listener.incoming().flatten() {
-        let app = app.clone();
-        thread::spawn(move || handle_web_bridge_request(app, stream));
-    }
+    thread::spawn(move || {
+        loop {
+            if let Ok(listener) = TcpListener::bind("0.0.0.0:9977") {
+                IS_BRIDGE_LEADER.store(true, Ordering::Relaxed);
+                for stream in listener.incoming().flatten() {
+                    let app_clone = app.clone();
+                    thread::spawn(move || handle_web_bridge_request(app_clone, stream));
+                }
+                IS_BRIDGE_LEADER.store(false, Ordering::Relaxed);
+            } else {
+                thread::sleep(std::time::Duration::from_secs(2));
+            }
+        }
+    });
 }
 
 fn handle_web_bridge_request(app: AppHandle, mut stream: TcpStream) {
@@ -652,6 +664,11 @@ fn bridge_invoke(app: AppHandle, payload: BridgeInvokeRequest) -> String {
         }
         "emergency_stop" => bridge_result(emergency_stop_blocking()),
         "list_server_files" => bridge_result(list_server_files(payload.args.get("path").and_then(|value| value.as_str()).map(str::to_string))),
+        "reboot_devices" => {
+            let serials = serde_json::from_value::<Vec<String>>(payload.args.get("serials").cloned().unwrap_or_default()).unwrap_or_default();
+            let mode = payload.args.get("mode").and_then(|v| v.as_str()).unwrap_or("download").to_string();
+            bridge_result(reboot_devices_blocking(serials, mode))
+        }
         "get_adb_devices_advanced" => bridge_result(get_adb_devices_advanced_blocking()),
         "get_samsung_ports" => bridge_result(get_samsung_ports_blocking()),
         "get_samsung_ports_detailed" => bridge_result(get_samsung_ports_detailed_blocking()),
@@ -684,6 +701,7 @@ fn bridge_invoke(app: AppHandle, payload: BridgeInvokeRequest) -> String {
             bridge_result(port_name.and_then(|port_name| command.and_then(|command| send_at_command_blocking(port_name, command))))
         }
         "get_resource_path" => bridge_result(bridge_arg_string(&payload.args, "name").and_then(|name| get_resource_path(app, name))),
+        "reload_udev_and_adb" => bridge_result(reload_udev_and_adb_blocking()),
         _ => serde_json::json!({ "ok": false, "error": format!("Unsupported bridge command: {}", payload.command) }).to_string(),
     }
 }
@@ -1357,6 +1375,23 @@ fn get_devices_blocking() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+async fn reboot_devices(serials: Vec<String>, mode: String) -> Result<(), String> {
+    run_blocking("Reboot devices", move || reboot_devices_blocking(serials, mode)).await
+}
+
+fn reboot_devices_blocking(serials: Vec<String>, mode: String) -> Result<(), String> {
+    let adb_path = find_adb();
+    for serial in serials {
+        let mut cmd = Command::new(&adb_path);
+        cmd.args(&["-s", &serial, "reboot", &mode]);
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(0x08000000);
+        let _ = cmd.output();
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn run_adb(args: Vec<String>) -> Result<String, String> {
     run_blocking("ADB command", move || run_adb_blocking(args)).await
 }
@@ -1396,6 +1431,32 @@ fn run_adb_blocking(args: Vec<String>) -> Result<String, String> {
     }
 
     Err(last_err)
+}
+
+fn reload_udev_and_adb_blocking() -> Result<String, String> {
+    let adb_path = find_adb();
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("sudo").args(["udevadm", "control", "--reload-rules"]).output();
+        let _ = Command::new("sudo").args(["udevadm", "trigger"]).output();
+        let _ = Command::new("udevadm").args(["control", "--reload-rules"]).output();
+        let _ = Command::new("udevadm").args(["trigger"]).output();
+    }
+
+    let _ = Command::new(&adb_path).arg("kill-server").output();
+    let _ = Command::new(&adb_path).arg("start-server").output();
+
+    let output = Command::new(&adb_path).arg("devices").output();
+    match output {
+        Ok(out) => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn reload_udev_and_adb() -> Result<String, String> {
+    run_blocking("Reload udev & ADB", reload_udev_and_adb_blocking).await
 }
 
 #[tauri::command]
@@ -1530,7 +1591,7 @@ struct DeviceCache {
 const SHARED_UI_FILE: &str = if cfg!(target_os = "windows") {
     "C:\\Windows\\Temp\\flashkit_ui_state.json"
 } else {
-    "/tmp/flashkit_ui_state.json"
+    "/tmp/flashkit_shared_state.json"
 };
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
@@ -1668,27 +1729,7 @@ fn save_shared_ui_state(
         merge_automation_state(&mut state.automation_state, patch);
     }
     if let Some(incoming_devices) = odin_devices {
-        if let (Some(existing_map), Some(incoming_map)) = (state.odin_devices.as_object_mut(), incoming_devices.as_object()) {
-            for (key, inc_val) in incoming_map {
-                if let Some(existing_val) = existing_map.get_mut(key) {
-                    if let (Some(existing_obj), Some(inc_obj)) = (existing_val.as_object_mut(), inc_val.as_object()) {
-                        let is_flashing = existing_obj.get("status").and_then(|s| s.as_str()) == Some("Flashing...");
-                        for (k, v) in inc_obj {
-                            if is_flashing && (k == "status" || k == "progress") {
-                                continue;
-                            }
-                            existing_obj.insert(k.clone(), v.clone());
-                        }
-                    } else {
-                        existing_map.insert(key.clone(), inc_val.clone());
-                    }
-                } else {
-                    existing_map.insert(key.clone(), inc_val.clone());
-                }
-            }
-        } else {
-            state.odin_devices = incoming_devices;
-        }
+        state.odin_devices = incoming_devices;
     }
     state.updated_at_ms = now_ms();
     
@@ -2038,13 +2079,16 @@ pub fn run() {
             // ADB / Provisioning commands
             get_devices,
             run_adb,
+            reboot_devices,
             get_samsung_ports,
             get_samsung_ports_detailed,
             resolve_usb_paths,
             get_adb_devices_advanced,
             send_at_command,
             get_resource_path,
+            reload_udev_and_adb,
             get_device_info,
+            is_bridge_leader,
             // Odin flash commands
             odin_list_devices,
             odin_flash_device,

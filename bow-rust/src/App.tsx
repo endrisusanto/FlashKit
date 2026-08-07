@@ -62,6 +62,8 @@ function sameStringList(a: string[], b: string[]) {
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
+
+
 function sameDeviceMap(a: Record<string, any>, b: Record<string, any>) {
   if (!a || !b) return false;
   const keysA = Object.keys(a);
@@ -79,17 +81,7 @@ function sameFilePaths(a: SharedFirmwareFiles, b: SharedFirmwareFiles) {
   return a.bl === b.bl && a.ap === b.ap && a.cp === b.cp && a.csc === b.csc && a.userdata === b.userdata;
 }
 
-function sameVerifyStateMap(a?: Record<string, any>, b?: Record<string, any>) {
-  if (!a || !b) return a === b;
-  const keysA = Object.keys(a);
-  const keysB = Object.keys(b);
-  if (keysA.length !== keysB.length) return false;
-  return keysA.every(k => {
-    const vA = a[k];
-    const vB = b[k];
-    return vB && vA.text === vB.text && vA.progress === vB.progress && vA.verifying === vB.verifying;
-  });
-}
+
 
 function isTauriRuntime() {
   return Boolean((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__);
@@ -246,10 +238,11 @@ export default function App() {
   const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
   const [busyDevices, setBusyDevices] = useState<string[]>([]);
   const [odinDeviceStates, setOdinDeviceStates] = useState<Record<string, DeviceData>>({});
-  const [currentVerifyProgress, setCurrentVerifyProgress] = useState(0);
   const [isVerifyingMd5, setIsVerifyingMd5] = useState(false);
   const [verifyMd5Progress, setVerifyMd5Progress] = useState(0);
-  const [sharedVerifyState, setSharedVerifyState] = useState<Record<string, { text: string; progress: number; verifying: boolean }> | undefined>(undefined);
+  const [isOdinFlashingState, setIsOdinFlashingState] = useState(false);
+  const [odinFlashProgress, setOdinFlashProgress] = useState(0);
+
   const [sharedFirmwareFiles, setSharedFirmwareFiles] = useState<SharedFirmwareFiles | null>(null);
   const [apFileName, setApFileName] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -341,26 +334,7 @@ export default function App() {
       .forEach(key => localStorage.removeItem(key));
   }, [desktopActive]);
 
-  useEffect(() => {
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith('port_history_')) {
-          const val = localStorage.getItem(key);
-          if (val) {
-            const parsed = JSON.parse(val);
-            if (parsed.model) {
-              const norm = normalizeModelName(parsed.model);
-              if (norm !== parsed.model) {
-                parsed.model = norm;
-                localStorage.setItem(key, JSON.stringify(parsed));
-              }
-            }
-          }
-        }
-      }
-    } catch {}
-  }, []);
+
 
   const reopenDesktop = async () => {
     try {
@@ -416,8 +390,8 @@ export default function App() {
     if (state.updated_at_ms <= sharedUiSeenAt.current) return;
     sharedUiSeenAt.current = state.updated_at_ms;
 
-    // ponytail: skip automation_state & selected_devices echo from our own save (1000ms debounce)
-    const isSelfEcho = Date.now() - lastLocalSaveMs.current < 1000;
+    // ponytail: skip automation_state & selected_devices echo from our own save (2000ms debounce)
+    const isSelfEcho = Date.now() - lastLocalSaveMs.current < 2000;
 
     if (!isSelfEcho) {
       // ponytail: sync selected_devices across all windows & clients
@@ -446,14 +420,10 @@ export default function App() {
       }
     }
 
-    // ponytail: always sync odin_devices, verify_state, firmware_files (no flicker risk)
+    // Sync odin_devices globally to render FLASHING badges on device cards across all windows
     if (state.odin_devices) {
       const incomingOdin = state.odin_devices as Record<string, DeviceData>;
       setOdinDeviceStates(prev => sameDeviceMap(prev, incomingOdin) ? prev : incomingOdin);
-    }
-    if (state.verify_state && typeof state.verify_state === "object") {
-      const incomingVerify = state.verify_state as Record<string, { text: string; progress: number; verifying: boolean }>;
-      setSharedVerifyState(prev => sameVerifyStateMap(prev, incomingVerify) ? prev : incomingVerify);
     }
     if (state.firmware_files) {
       setSharedFirmwareFiles(prev => sameFilePaths(prev || { bl: "", ap: "", cp: "", csc: "", userdata: "" }, state.firmware_files) ? prev : state.firmware_files);
@@ -565,11 +535,10 @@ export default function App() {
   useEffect(() => {
     if (!backendActive || !sharedUiHydrated.current) return;
     if (sameStringList(selectedDevices, lastSavedSelectedDevices.current)) return;
-    if (!isLeader) return; // ponytail: only leader can write state automatically
 
     lastSavedSelectedDevices.current = selectedDevices;
-
     lastLocalSaveMs.current = Date.now(); // ponytail: debounce self-echo
+
     invoke<SharedUiState>("save_shared_ui_state", {
       selected_devices: selectedDevices,
     }).then(state => {
@@ -636,12 +605,6 @@ export default function App() {
         _model: modelName,
         model: modelName,
       };
-      if (device.usb_port && modelName) {
-        localStorage.setItem('port_history_' + device.usb_port, JSON.stringify({
-          serial: device.serial,
-          model: modelName,
-        }));
-      }
       return acc;
     }, {});
 
@@ -679,20 +642,27 @@ export default function App() {
 
   const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-  const waitForAdb = async (timeoutMs = 600000, expectedDevices: string[] = [], preFlashDevices: string[] = []) => {
+  const waitForAdb = async (timeoutMs = 600000, expectedDevices: string[] = [], preFlashDevices: string[] = [], expectedPorts: string[] = []) => {
     const startTime = Date.now();
     while (Date.now() - startTime < timeoutMs) {
       if (stopRequested.current) return false;
       try {
-        const list: string[] = await invoke<string[]>("get_devices");
-        const readyDevices = expectedDevices.length > 0
-          ? list.filter(d => expectedDevices.includes(d))
-          : list.filter(d => !preFlashDevices.includes(d));
+        await refreshDevices(true);
+        await delay(2000); // Beri waktu UI untuk update
+
+        const adbDetails = await invoke<{serial: string, usb_port: string}[]>("get_adb_devices_advanced");
+        const readyDevices = adbDetails.filter(d => {
+          if (expectedDevices.includes(d.serial)) return true;
+          if (d.usb_port && expectedPorts.includes(d.usb_port)) return true;
+          if (expectedDevices.length === 0 && expectedPorts.length === 0 && !preFlashDevices.includes(d.serial)) return true;
+          return false;
+        });
+
         if (readyDevices.length > 0) return true;
       } catch (e) {
         console.error(e);
       }
-      await delay(5000);
+      await delay(8000);
     }
     return false;
   };
@@ -719,7 +689,11 @@ export default function App() {
         if (!silent) appendLog(`[COM] Peringatan: ${e}`);
       }
 
-      if (!silent) appendLog("Memindai perangkat ADB...");
+      if (!silent) {
+        appendLog("⚡ Reloading udev rules & ADB server...");
+        try { await invoke("reload_udev_and_adb"); } catch { }
+        appendLog("Memindai perangkat ADB...");
+      }
       try {
         const advList: any[] = await invoke("get_adb_devices_advanced");
         const list = advList.map((d: any) => d.serial);
@@ -730,24 +704,48 @@ export default function App() {
           const info = adv.info || {};
           const normModel = normalizeModelName(info['ro.product.model'] || adv.model);
           details[adv.serial] = { ...info, usb_port: adv.usb_port, _model: normModel, model: normModel, 'ro.product.model': normModel };
-          localStorage.setItem('port_history_' + adv.usb_port, JSON.stringify({ serial: adv.serial, model: normModel }));
         }
 
+        const odinList: string[] = await invoke<string[]>("odin_list_devices").catch(() => []);
+
         setDeviceDetails(details);
-        const cache = await invoke<DeviceCache>("save_device_cache", {
-          devices: advList.map((adv: any) => {
-            const detail = details[adv.serial] || {};
-            const { usb_port, _model, ...info } = detail;
-            return {
-              serial: adv.serial,
-              usb_port: adv.usb_port,
-              model: normalizeModelName(info['ro.product.model'] || adv.model || ""),
-              info,
-            };
-          }),
+
+        setOdinDeviceStates(prev => {
+          const next = { ...prev };
+          let changed = false;
+          for (const [key, data] of Object.entries(next)) {
+            const isOdinActive = odinList.includes(key) || (data.port && odinList.includes(data.port));
+            const isAdbActive = data.serial ? list.includes(data.serial) : false;
+            if (!isOdinActive && !isAdbActive && data.status !== "Flashing...") {
+              delete next[key];
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
         });
+
+        const newCachedList: CachedDevice[] = advList.map((adv: any) => {
+          const detail = details[adv.serial] || {};
+          const { usb_port, _model, ...info } = detail;
+          return {
+            serial: adv.serial,
+            usb_port: adv.usb_port,
+            model: normalizeModelName(info['ro.product.model'] || adv.model || ""),
+            info,
+          };
+        });
+
+        const cache = await invoke<DeviceCache>("save_device_cache", { devices: newCachedList });
         lastDeviceCacheAt.current = cache.updated_at_ms;
-        if (!silent) appendLog(`Ditemukan ${list.length} perangkat`);
+        const odinCount = Object.keys(odinDeviceStates).length;
+        const totalCount = list.length + odinCount;
+        if (!silent) {
+          if (odinCount > 0) {
+            appendLog(`Ditemukan ${totalCount} total perangkat (${list.length} ADB, ${odinCount} Odin Mode)`);
+          } else {
+            appendLog(`Ditemukan ${list.length} perangkat ADB`);
+          }
+        }
 
         // ponytail: warn if modem detected but no ADB found (device needs reboot)
         if (samsungPortsCount > 0 && list.length === 0 && !silent) {
@@ -783,9 +781,6 @@ export default function App() {
   const resetStoredDeviceMetadata = async () => {
     try {
       await invoke("reset_device_cache");
-      Object.keys(localStorage)
-        .filter(key => key.startsWith("port_history_"))
-        .forEach(key => localStorage.removeItem(key));
       lastDeviceCacheAt.current = 0;
       setDevices([]);
       setDeviceDetails({});
@@ -960,8 +955,16 @@ export default function App() {
       try {
         const run = async (args: string[]) => {
           if (stopRequested.current) return;
-          await invoke("run_adb", { args: ["-s", dev, "shell", ...args] });
-          await delay(100);
+          for (let attempt = 0; attempt < 5; attempt++) {
+            try {
+              await invoke("run_adb", { args: ["-s", dev, "shell", ...args] });
+              await delay(100);
+              break;
+            } catch (err: any) {
+              if (attempt === 4) throw err;
+              await delay(1500);
+            }
+          }
         };
         await run(["settings put global development_settings_enabled 1"]);
         await run(["settings put global adb_enabled 1"]);
@@ -1112,7 +1115,13 @@ export default function App() {
       stopRequested.current = false;
       appendLog("==== MEMULAI MASTER SEQUENCE ====");
       if (activeSelection.length > 0) {
-        appendLog(`[Auto] Mengunci ${activeSelection.length} perangkat: ${activeSelection.join(", ")}`);
+        const uniqueCount = new Set(
+          activeSelection.map(id => {
+            const m = mergedDevices.find(d => d.id === id || d.odinKey === id || d.serial === id || d.port === id);
+            return m ? (m.port || m.serial || m.id) : id;
+          })
+        ).size;
+        appendLog(`[Auto] Mengunci ${uniqueCount} perangkat: ${activeSelection.join(", ")}`);
       } else if (seqOdin) {
         appendLog("[Auto] Memulai dengan mode Odin (Deteksi ADB akan dilakukan setelah flashing).");
       }
@@ -1125,68 +1134,75 @@ export default function App() {
         if (stopRequested.current) throw new Error("STOP");
         setCurrentStep(0);
         if (odinRef.current) {
+          // Auto reboot ADB devices to Download Mode before flashing (only if NOT already in Download Mode)
+          const adbSerialsToReboot = activeSelection.filter(id => {
+            if (id.startsWith("/dev/") || id.startsWith("USB:") || id.startsWith("COM")) return false;
+            const item = mergedDevices.find(d => d.id === id || d.serial === id);
+            if (item && (item.odinKey || item.type === "odin")) return false;
+            const hasOdinMatch = Object.values(odinDeviceStates).some(o => 
+              (o.serial && o.serial === id) || (item?.port && o.port === item.port)
+            );
+            if (hasOdinMatch) return false;
+            return true;
+          });
+
+          if (adbSerialsToReboot.length > 0) {
+            appendLog(`[Auto] Rebooting ${adbSerialsToReboot.length} ADB devices to Download Mode...`);
+            try {
+              await invoke("reboot_devices", { serials: adbSerialsToReboot, mode: "download" });
+              appendLog("⏳ Menunggu perangkat masuk ke Download Mode (12 detik)...");
+              await delay(12000);
+            } catch (e) {
+              appendLog(`⚠ Gagal reboot ke download mode: ${e}`);
+            }
+          }
+
           appendLog("Tahap 0: Menjalankan Odin Flashing...");
+          await odinRef.current.refreshDevices();
           if (!odinRef.current.hasCheckedDevices()) {
             appendLog("✗ Odin Flash dilewati: Tidak ada perangkat yang dicentang di tab Odin Flash.");
           } else {
             const flashResult = await odinRef.current.startFlash();
             if (!flashResult) {
-              appendLog("⚠ Odin Flash memiliki kegagalan atau file firmware belum dipilih!");
+              appendLog("⚠ Odin Flash tidak ada yang berhasil atau file firmware belum dipilih!");
               return;
             } else {
               appendLog("✓ Odin Flash Selesai.");
-              appendLog("⏳ Menunggu perangkat reboot dan terdeteksi ADB (Maksimal 10 Menit)...");
+              appendLog("⏳ Device booting up, menunggu sampai koneksi stabil (Maksimal 10 Menit)...");
 
-              const adbReady = await waitForAdb(600000, activeSelection, preFlashAdb);
+              const expectedPorts = mergedDevices.filter(d => activeSelection.includes(d.id) && d.port).map(d => d.port as string);
+              const adbReady = await waitForAdb(600000, activeSelection, preFlashAdb, expectedPorts);
               if (!adbReady) {
                 appendLog("✗ Timeout: Perangkat tidak terdeteksi oleh ADB setelah 10 menit.");
                 return;
               }
 
-              appendLog("✓ Perangkat ADB terdeteksi! Menunggu stabilisasi sistem (10 detik)...");
+              appendLog("✓ Perangkat terdeteksi! Menstabilkan koneksi sistem (10 detik)...");
+              appendLog("⚡ Reloading udev rules & ADB server...");
+              try {
+                await invoke("reload_udev_and_adb");
+                odinRef.current?.resetAllStatuses();
+                setOdinDeviceStates({});
+                await invoke("save_shared_ui_state", { odin_devices: {} });
+              } catch { }
               await delay(10000);
               await refreshDevices(true);
 
-              // Refresh list device di layar (Retry logic: 30x)
-              let foundNew = false;
-              for (let i = 0; i < 30; i++) {
-                if (stopRequested.current) break;
-                await refreshDevices(true);
-                try {
-                  const currentAdb = await invoke<string[]>("get_devices");
-                  // ponytail: filter out USB port strings from activeSelection to get actual target serial count
-                  const targetSerials = activeSelection.filter(s => !s.startsWith("USB:") && !s.startsWith("/dev/"));
-                  const newlyBooted = targetSerials.length > 0
-                    ? currentAdb.filter(d => targetSerials.includes(d))
-                    : (activeSelection.length > 0
-                        ? currentAdb.filter(d => activeSelection.includes(d))
-                        : currentAdb.filter(d => !preFlashAdb.includes(d)));
+              // Resolve newly booted ADB serials by USB port or serial ID
+              try {
+                const advDevices = await invoke<{serial: string, usb_port: string}[]>("get_adb_devices_advanced");
+                const newlyBooted = advDevices.filter(d => 
+                  activeSelection.includes(d.serial) || 
+                  (d.usb_port && expectedPorts.includes(d.usb_port)) ||
+                  (activeSelection.length === 0 && !preFlashAdb.includes(d.serial))
+                ).map(d => d.serial);
 
-                  const requiredCount = targetSerials.length > 0 ? targetSerials.length : (activeSelection.length > 0 ? activeSelection.length : 1);
-
-                  if (newlyBooted.length > 0) {
-                    setSelectedDevices(newlyBooted);
-                    currentSelection = newlyBooted;
-                    if (newlyBooted.length >= requiredCount) {
-                      appendLog(`✓ Semua perangkat target (${newlyBooted.length}) terdeteksi kembali: ${newlyBooted.join(", ")}`);
-                      foundNew = true;
-                      break;
-                    }
-                  }
-                } catch (e) { }
-
-                if (i < 29) {
-                  appendLog(`⏳ Perangkat belum terdeteksi sempurna (Percobaan ${i + 1}/30). Mencoba lagi dalam 10 detik...`);
-                  await delay(10000);
+                if (newlyBooted.length > 0) {
+                  setSelectedDevices(newlyBooted);
+                  currentSelection = newlyBooted;
+                  appendLog(`✓ Perangkat ADB terdeteksi kembali: ${newlyBooted.join(", ")}`);
                 }
-              }
-
-              if (!foundNew) {
-                appendLog("✗ KRITIKAL: Perangkat tidak ditemukan setelah 30x percobaan!");
-                alert("Kritikal: Perangkat tidak terdeteksi setelah reboot!\nProses dihentikan secara paksa demi keamanan.");
-                await handleEmergencyStop();
-                return;
-              }
+              } catch (e) { }
             }
           }
         }
@@ -1227,17 +1243,30 @@ export default function App() {
       setLoading(false);
       // Clear busy at the end
       try { await invoke("clear_busy", { serials: activeSelection }); } catch { }
+      // Clear completed status labels when master sequence flow finishes
+      try {
+        odinRef.current?.resetAllStatuses();
+        setOdinDeviceStates({});
+        await invoke("save_shared_ui_state", { odin_devices: {} });
+      } catch { }
+      setTimeout(() => {
+        refreshDevices(true);
+      }, 1000);
     }
   };
 
   const toggleDevice = (id: string, serial?: string, odinKey?: string, port?: string) => {
     if (busyDevices.includes(id)) return;
+    lastLocalSaveMs.current = Date.now();
+    const primaryId = odinKey || id;
     const keys = [id, serial, odinKey, port].filter((k): k is string => Boolean(k));
     setSelectedDevices(prev => {
       const isCurrentlySelected = keys.some(k => prev.includes(k));
-      return isCurrentlySelected
-        ? prev.filter(item => !keys.includes(item))
-        : Array.from(new Set([...prev, ...keys]));
+      if (isCurrentlySelected) {
+        return prev.filter(item => !keys.includes(item));
+      } else {
+        return Array.from(new Set([...prev.filter(item => !keys.includes(item)), primaryId]));
+      }
     });
   };
 
@@ -1253,29 +1282,7 @@ export default function App() {
       if (detail.usb_port) seenPorts.add(detail.usb_port);
       let model = detail['ro.product.model'] || detail._model || detail.model;
 
-      // Fallback 1: check port_history in localStorage
-      if (!model && detail.usb_port) {
-        try {
-          const hist = localStorage.getItem('port_history_' + detail.usb_port);
-          if (hist) model = JSON.parse(hist).model;
-        } catch {}
-      }
 
-      // Fallback 2: search all localStorage port_history entries for matching serial
-      if (!model) {
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && key.startsWith('port_history_')) {
-            try {
-              const hist = JSON.parse(localStorage.getItem(key) || '{}');
-              if (hist.serial === serial && hist.model) {
-                model = hist.model;
-                break;
-              }
-            } catch {}
-          }
-        }
-      }
 
       const normalized = normalizeModelName(model || serial);
 
@@ -1290,9 +1297,20 @@ export default function App() {
 
     // 2. Add Odin devices
     Object.entries(odinDeviceStates).forEach(([path, data]) => {
-      const serial = data.serial;
-      const model = normalizeModelName(data.model);
-      const port = data.port;
+      let serial = data.serial;
+      let model = data.model;
+      let port = data.port || path;
+
+      // Lookup model and serial from deviceDetails if missing or UNKNOWN MODEL
+      if ((!serial || !model || model === "UNKNOWN MODEL") && (port || path)) {
+        const cached = Object.values(deviceDetails).find(d => d.usb_port === port || d.usb_port === path || (serial && d.serial === serial));
+        if (cached) {
+          if (!model || model === "UNKNOWN MODEL") model = cached.model || cached._model || cached['ro.product.model'];
+          if (!serial) serial = cached.serial;
+        }
+      }
+
+      const normalizedModel = normalizeModelName(model);
       const isSeenSerial = Boolean(serial && seenSerials.has(serial));
       const isSeenPort = Boolean(port && seenPorts.has(port));
 
@@ -1301,7 +1319,7 @@ export default function App() {
         const idx = list.findIndex(item => (serial && item.serial === serial) || (port && item.port === port));
         if (idx !== -1) {
           list[idx].odinKey = path;
-          list[idx].model = normalizeModelName(list[idx].model || model);
+          list[idx].model = normalizeModelName(list[idx].model || normalizedModel);
           if (serial) list[idx].serial = serial;
         }
       } else {
@@ -1312,7 +1330,7 @@ export default function App() {
           type: "odin",
           odinKey: path,
           serial: serial,
-          model: model,
+          model: normalizedModel,
           port: port,
         });
       }
@@ -1386,7 +1404,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen h-[100dvh] bg-[#050505] text-white overflow-hidden select-none p-2 sm:p-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+    <div className="fixed inset-0 flex flex-col bg-[#050505] text-white overflow-hidden select-none p-2 sm:p-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))]">
       <div className="flex flex-col flex-1 overflow-hidden bg-[#0a0a0a] border border-[#222] rounded-3xl shadow-[0_0_60px_rgba(0,0,0,0.8)] relative">
 
         {showAdbWarningModal && (
@@ -1604,9 +1622,9 @@ export default function App() {
         )}
 
         {/* ── NAVBAR ── */}
-        <header className="grid grid-cols-[1fr_auto_1fr] items-center px-4 md:px-8 h-16 md:h-20 bg-[#0d0d0d] border-b border-[#222] shrink-0 gap-3" data-tauri-drag-region>
-          <div className="justify-self-start" />
-          <div className="flex h-full gap-2 md:gap-4 shrink-0">
+        <header className="flex md:grid md:grid-cols-[1fr_auto_1fr] justify-center md:justify-between items-center px-2 md:px-8 h-16 md:h-20 bg-[#0d0d0d] border-b border-[#222] shrink-0 gap-3" data-tauri-drag-region>
+          <div className="hidden md:block justify-self-start" />
+          <div className="flex h-full gap-2 md:gap-4 shrink-0 overflow-x-auto custom-scrollbar no-scrollbar w-full md:w-auto justify-center">
             <button
               id="tab-provisioning"
               onClick={() => setActiveTab("provisioning")}
@@ -1621,14 +1639,23 @@ export default function App() {
               id="tab-odin"
               onClick={() => setActiveTab("odin")}
               className={`h-full px-3 sm:px-6 md:px-12 text-[10px] sm:text-[11px] md:text-[13px] font-black uppercase tracking-[0.05em] sm:tracking-[0.1em] md:tracking-[0.2em] border-b-[3px] transition-all relative overflow-hidden ${activeTab === "odin"
-                ? "border-blue-500 text-blue-400 bg-blue-500/[0.02]"
+                ? (isOdinFlashingState ? "border-green-500 text-green-400 bg-green-500/[0.02]" : "border-blue-500 text-blue-400 bg-blue-500/[0.02]")
                 : "border-transparent text-white/30 hover:text-white/60 hover:bg-white/[0.01]"
                 }`}
             >
-              {currentVerifyProgress > 0 && currentVerifyProgress < 100 && (
+              {/* Odin Flashing Progress Bar (GREEN) */}
+              {isOdinFlashingState && odinFlashProgress > 0 && odinFlashProgress < 100 && (
+                <div
+                  className="absolute bottom-0 left-0 h-full bg-green-500/30 shadow-[0_0_24px_rgba(34,197,94,0.35)] transition-all duration-300 pointer-events-none"
+                  style={{ width: `${odinFlashProgress}%` }}
+                />
+              )}
+
+              {/* MD5 Verify Progress Bar (BLUE) */}
+              {!isOdinFlashingState && isVerifyingMd5 && verifyMd5Progress > 0 && verifyMd5Progress < 100 && (
                 <div
                   className="absolute bottom-0 left-0 h-full bg-blue-500/30 shadow-[0_0_24px_rgba(59,130,246,0.35)] transition-all duration-300 pointer-events-none"
-                  style={{ width: `${currentVerifyProgress}%` }}
+                  style={{ width: `${verifyMd5Progress}%` }}
                 />
               )}
               <span className="relative z-10">FIRMWARE</span>
@@ -1644,13 +1671,18 @@ export default function App() {
                 ref={odinRef}
                 isLeader={isLeader}
                 allSerials={devices}
-                selectedSerials={selectedDevices}
+                selectedSerials={[...selectedDevices, ...mergedDevices.filter(d => selectedDevices.includes(d.id) && d.port).map(d => d.port as string)]}
                 setSelectedSerials={setSelectedDevices}
                 odinDevices={odinDeviceStates}
                 onDevicesUpdate={setOdinDeviceStates}
-                sharedVerifyState={sharedVerifyState}
                 sharedFirmwareFiles={sharedFirmwareFiles || undefined}
-                onVerifyProgress={setCurrentVerifyProgress}
+                onOdinFlashProgress={(flashing, progress) => {
+                  setIsOdinFlashingState(flashing);
+                  setOdinFlashProgress(progress);
+                }}
+                onVerifyProgress={(progress) => {
+                  setVerifyMd5Progress(progress);
+                }}
                 onVerifyStateChange={(verifying, progress) => {
                   setIsVerifyingMd5(verifying);
                   setVerifyMd5Progress(progress);
@@ -1710,11 +1742,14 @@ export default function App() {
                     return (
                       <section key={group.model} className="flex flex-col gap-2">
                         <button
-                          onClick={() => setSelectedDevices(prev => {
-                            const current = new Set(prev);
-                            groupAvailableIds.forEach(id => allGroupSelected ? current.delete(id) : current.add(id));
-                            return [...current];
-                          })}
+                          onClick={() => {
+                            lastLocalSaveMs.current = Date.now();
+                            setSelectedDevices(prev => {
+                              const current = new Set(prev);
+                              groupAvailableIds.forEach(id => allGroupSelected ? current.delete(id) : current.add(id));
+                              return [...current];
+                            });
+                          }}
                           disabled={groupAvailableIds.length === 0}
                           className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-white/5 hover:border-white/15 disabled:opacity-40 transition-all"
                         >
@@ -1730,7 +1765,7 @@ export default function App() {
                         {group.devices.map((item) => {
                           const id = item.id;
                           const odinData = item.odinKey ? odinDeviceStates[item.odinKey] : undefined;
-                          const isOdinMode = item.type === "odin" || (odinData !== undefined && (odinData.status === "Flashing..." || odinData.status === "Pass" || odinData.status === "Fail"));
+                          const isOdinMode = item.type === "odin" || odinData !== undefined;
                           const isFlashing = odinData?.status === "Flashing...";
                           const isPass = odinData?.status === "Pass";
                           const isFail = odinData?.status === "Fail";
@@ -2014,15 +2049,16 @@ export default function App() {
           </div>
         </main>
 
-        <footer className="h-10 bg-[#0d0d0d] border-t border-[#222] flex items-center px-8 justify-between shrink-0 relative z-50">
-          <div className="flex items-center gap-4">
+        <footer className="h-10 bg-[#0d0d0d] border-t border-[#222] flex items-center px-3 md:px-8 justify-between shrink-0 relative z-50 overflow-x-hidden">
+          <div className="flex items-center gap-2 md:gap-4 truncate">
             <div className={`w-2.5 h-2.5 rounded-full ${mergedDevices.length > 0 ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.4)]' : 'bg-white/10'}`} />
             <span className="text-[10px] font-black uppercase tracking-widest text-white/40">{mergedDevices.length} Units Connected</span>
           </div>
           {isLeader && (
-            <div className="flex items-center gap-1.5 bg-blue-500/10 px-2 py-1 rounded-md border border-blue-500/20">
+            <div className="flex items-center gap-1 md:gap-1.5 bg-blue-500/10 px-1.5 md:px-2 py-1 rounded-md border border-blue-500/20 shrink-0">
               <Wifi className="w-3.5 h-3.5 text-blue-400" />
-              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400">Online!</span>
+              <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-wider text-blue-400 hidden sm:inline-block">Online!</span>
+              <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-wider text-blue-400 sm:hidden">ON</span>
             </div>
           )}
         </footer>
