@@ -655,12 +655,14 @@ fn bridge_invoke(app: AppHandle, payload: BridgeInvokeRequest) -> String {
             .ok();
             let automation_state = payload.args.get("automation_state").cloned();
             let odin_devices = payload.args.get("odin_devices").cloned();
+            let custom_node_name = payload.args.get("custom_node_name").and_then(|v| v.as_str().map(|s| s.to_string()));
             bridge_ok(save_shared_ui_state(
                 app,
                 firmware_files,
                 selected_devices,
                 automation_state,
                 odin_devices,
+                custom_node_name,
             ))
         }
         "get_devices" => bridge_result(get_devices_blocking()),
@@ -1669,6 +1671,8 @@ struct SharedUiState {
     automation_state: SharedAutomationState,
     #[serde(default)]
     odin_devices: serde_json::Value,
+    #[serde(default)]
+    custom_node_name: Option<String>,
     updated_at_ms: u128,
 }
 
@@ -1727,8 +1731,10 @@ fn clean_startup_cache() {
     busy.busy_devices.clear();
     write_busy_state(&busy);
 
-    // ponytail: Reset shared UI state on startup so UI starts with a clean slate
-    let default_state = SharedUiState::default();
+    // ponytail: Preserve custom_node_name across startup cache reset
+    let existing = read_shared_ui_state();
+    let mut default_state = SharedUiState::default();
+    default_state.custom_node_name = existing.custom_node_name;
     write_shared_ui_state(&default_state);
 }
 
@@ -1744,6 +1750,7 @@ fn save_shared_ui_state(
     selected_devices: Option<Vec<String>>,
     automation_state: Option<serde_json::Value>,
     odin_devices: Option<serde_json::Value>,
+    custom_node_name: Option<String>,
 ) -> SharedUiState {
     let mut guard = SHARED_UI_MEMORY_STATE.lock().unwrap();
     let mut state = if let Some(cached) = &*guard {
@@ -1775,6 +1782,9 @@ fn save_shared_ui_state(
     }
     if let Some(incoming_devices) = odin_devices {
         state.odin_devices = incoming_devices;
+    }
+    if let Some(name) = custom_node_name {
+        state.custom_node_name = if name.trim().is_empty() { None } else { Some(name) };
     }
     state.updated_at_ms = now_ms();
     
