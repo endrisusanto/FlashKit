@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { useLeaderElection } from "./hooks/useLeaderElection";
 import { listen } from "@tauri-apps/api/event";
-import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X, Download, ShieldAlert, DatabaseZap, FileText } from "lucide-react";
+import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X, Download, ShieldAlert, DatabaseZap } from "lucide-react";
 import OdinFlash, { OdinFlashRef, DeviceData, SharedFirmwareFiles } from "./OdinFlash";
 import { WorkstationSelector, WorkstationNode } from "./components/WorkstationSelector";
 import logo from './assets/logo.png';
@@ -53,9 +53,11 @@ type SharedUiState = {
     current_step: number | null;
     is_stopping: boolean;
     logs: string[];
+    device_statuses?: Record<string, string>;
   };
   odin_devices?: Record<string, any>;
   verify_state?: Record<string, any>;
+  busy_devices?: string[];
   updated_at_ms: number;
 };
 
@@ -75,6 +77,15 @@ function sameDeviceMap(a: Record<string, any>, b: Record<string, any>) {
     const dB = b[k];
     return dB && dA.status === dB.status && dA.progress === dB.progress && dA.checked === dB.checked && dA.model === dB.model;
   });
+}
+
+function sameStringMap(a?: Record<string, string>, b?: Record<string, string>) {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every(k => a[k] === b[k]);
 }
 
 function sameFilePaths(a: SharedFirmwareFiles, b: SharedFirmwareFiles) {
@@ -247,13 +258,14 @@ export default function App() {
   const [verifyMd5Progress, setVerifyMd5Progress] = useState(0);
   const [isOdinFlashingState, setIsOdinFlashingState] = useState(false);
   const [odinFlashProgress, setOdinFlashProgress] = useState(0);
+  const [deviceStepStatuses, setDeviceStepStatuses] = useState<Record<string, string>>({});
 
   const [sharedFirmwareFiles, setSharedFirmwareFiles] = useState<SharedFirmwareFiles | null>(null);
   const [apFileName, setApFileName] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [isRefreshingDevices, setIsRefreshingDevices] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const logContainerRef = useRef<HTMLDivElement>(null);
   const [ssid, setSsid] = useState(DEFAULT_WIFI_SSID);
   const [password, setPassword] = useState(DEFAULT_WIFI_PASSWORD);
 
@@ -425,6 +437,17 @@ export default function App() {
       }
     }
 
+    // ponytail: sync device_statuses globally across all windows & web clients unconditionally
+    if (state.automation_state?.device_statuses) {
+      const statuses = state.automation_state.device_statuses as Record<string, string>;
+      setDeviceStepStatuses(prev => sameStringMap(prev, statuses) ? prev : statuses);
+    }
+
+    // Sync busy_devices globally across all windows & web clients
+    if (state.busy_devices) {
+      setBusyDevices(prev => sameStringList(prev, state.busy_devices!) ? prev : state.busy_devices!);
+    }
+
     // Sync odin_devices globally to render FLASHING badges on device cards across all windows
     if (state.odin_devices) {
       const incomingOdin = state.odin_devices as Record<string, DeviceData>;
@@ -473,6 +496,22 @@ export default function App() {
     };
   }, [desktopActive]);
 
+  // ponytail: Poll shared UI state for secondary desktop instances across process boundaries
+  useEffect(() => {
+    if (!desktopActive || !backendActive) return;
+    const pollState = () => {
+      invoke<SharedUiState>("get_shared_ui_state")
+        .then(state => {
+          applySharedUiState(state);
+          sharedUiHydrated.current = true;
+        })
+        .catch(() => {});
+    };
+    pollState();
+    const interval = window.setInterval(pollState, 1000);
+    return () => window.clearInterval(interval);
+  }, [backendActive, desktopActive]);
+
   // ponytail: Real-time Event Stream / SSE sync for Web client
   useEffect(() => {
     if (desktopActive || !backendActive) return;
@@ -510,6 +549,36 @@ export default function App() {
     };
     pollState();
     const interval = window.setInterval(pollState, 1500);
+    return () => window.clearInterval(interval);
+  }, [backendActive, desktopActive]);
+
+  // ponytail: Poll device cache for Web clients to ensure ADB metadata (model, serial, port) is synced across all windows
+  useEffect(() => {
+    if (desktopActive || !backendActive) return;
+    const fetchCache = () => {
+      invoke<DeviceCache>("get_device_cache")
+        .then(cache => {
+          if (cache && cache.devices) {
+            const details: Record<string, any> = {};
+            cache.devices.forEach((dev: any) => {
+              if (dev.serial) {
+                const norm = normalizeModelName(dev.model || (dev.info && dev.info['ro.product.model']) || "");
+                details[dev.serial] = {
+                  ...(dev.info || {}),
+                  usb_port: dev.usb_port,
+                  _model: norm,
+                  model: norm,
+                  'ro.product.model': norm,
+                };
+              }
+            });
+            setDeviceDetails(prev => ({ ...prev, ...details }));
+          }
+        })
+        .catch(() => {});
+    };
+    fetchCache();
+    const interval = window.setInterval(fetchCache, 2500);
     return () => window.clearInterval(interval);
   }, [backendActive, desktopActive]);
 
@@ -564,7 +633,9 @@ export default function App() {
   }, [backendActive, selectedDevices]);
 
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
   }, [logs]);
 
   useEffect(() => {
@@ -631,11 +702,15 @@ export default function App() {
     if (!backendActive) return;
     const poll = async () => {
       try {
-        const [busy, cache] = await Promise.all([
+        const [busy, cache, statuses] = await Promise.all([
           invoke<string[]>("get_busy_devices"),
           invoke<DeviceCache>("get_device_cache"),
+          invoke<Record<string, string>>("get_device_statuses"),
         ]);
         setBusyDevices(busy);
+        if (statuses && typeof statuses === "object") {
+          setDeviceStepStatuses(prev => sameStringMap(prev, statuses) ? prev : statuses);
+        }
         if (!loading) applyDeviceCache(cache);
       } catch { }
     };
@@ -643,14 +718,19 @@ export default function App() {
     const interval = setInterval(poll, 4000);
     let unlistenCache: (() => void) | undefined;
     let unlistenBusy: (() => void) | undefined;
+    let unlistenStatuses: (() => void) | undefined;
     if (desktopActive) {
       listen<DeviceCache>("device-cache-updated", (event) => applyDeviceCache(event.payload)).then(fn => { unlistenCache = fn; });
       listen<string[]>("busy-state-updated", (event) => setBusyDevices(event.payload)).then(fn => { unlistenBusy = fn; });
+      listen<Record<string, string>>("device-statuses-updated", (event) => {
+        if (event.payload) setDeviceStepStatuses(prev => sameStringMap(prev, event.payload) ? prev : event.payload);
+      }).then(fn => { unlistenStatuses = fn; });
     }
     return () => {
       clearInterval(interval);
-      unlistenCache?.();
-      unlistenBusy?.();
+      if (unlistenCache) unlistenCache();
+      if (unlistenBusy) unlistenBusy();
+      if (unlistenStatuses) unlistenStatuses();
     };
   }, [loading, desktopActive, backendActive]);
 
@@ -704,7 +784,7 @@ export default function App() {
       }
 
       if (!silent) {
-        appendLog("⚡ Reloading udev rules & ADB server...");
+        appendLog("⚡ Memindai udev rules & perangkat ADB (Aman)...");
         try { await invoke("reload_udev_and_adb"); } catch { }
         appendLog("Memindai perangkat ADB...");
       }
@@ -718,21 +798,102 @@ export default function App() {
           const info = adv.info || {};
           const normModel = normalizeModelName(info['ro.product.model'] || adv.model);
           details[adv.serial] = { ...info, usb_port: adv.usb_port, _model: normModel, model: normModel, 'ro.product.model': normModel };
+
+          // Fix: Write port_history to localStorage so model/serial can be recovered after download mode reboot
+          if (adv.usb_port && adv.serial) {
+            try {
+              localStorage.setItem('port_history_' + adv.usb_port, JSON.stringify({
+                serial: adv.serial,
+                model: normModel,
+                updated: Date.now(),
+              }));
+            } catch {}
+          }
         }
 
         const odinList: string[] = await invoke<string[]>("odin_list_devices").catch(() => []);
+        const resolvedPorts: Record<string, string> = odinList.length > 0 ? await invoke<Record<string, string>>("resolve_usb_paths", { devices: odinList }).catch(() => ({})) : {};
 
-        setDeviceDetails(details);
+        setDeviceDetails(prev => ({ ...prev, ...details }));
 
         setOdinDeviceStates(prev => {
           const next = { ...prev };
           let changed = false;
+
+          // 1. Populate/Update all detected Odin devices immediately
+          for (const dev of odinList) {
+            const port = resolvedPorts[dev] || dev;
+            let serial: string | undefined = undefined;
+            let model: string | undefined = undefined;
+
+            try {
+              const history = localStorage.getItem('port_history_' + port);
+              if (history) {
+                const parsed = JSON.parse(history);
+                if (parsed.serial) serial = parsed.serial;
+                if (parsed.model) model = parsed.model;
+              }
+            } catch {}
+
+            if (!serial || !model) {
+              const cached: any = Object.values({ ...prev, ...details }).find((d: any) =>
+                (port && (d.usb_port === port || d.port === port)) ||
+                (dev && (d.usb_port === dev || d.port === dev || d.path === dev)) ||
+                (serial && d.serial === serial)
+              );
+              if (cached) {
+                if (!model) model = cached.model || cached._model || cached['ro.product.model'];
+                if (!serial) serial = cached.serial;
+              }
+            }
+
+            if (!next[dev]) {
+              next[dev] = {
+                path: dev,
+                port: port,
+                serial,
+                model,
+                status: "Ready",
+                progress: 0,
+                log: `Attached at ${dev}`,
+                checked: Boolean(
+                  (serial && selectedDevices.includes(serial)) ||
+                  selectedDevices.includes(dev) ||
+                  (port && selectedDevices.includes(port))
+                ),
+              };
+              changed = true;
+            } else {
+              if (!next[dev].port && port) { next[dev].port = port; changed = true; }
+              if (!next[dev].serial && serial) { next[dev].serial = serial; changed = true; }
+              if (!next[dev].model && model) { next[dev].model = model; changed = true; }
+            }
+          }
+
+          // 2. Preserve active devices and delete stale ones
+          // Also clean up duplicate entries sharing the same port (USB re-enumeration after reboot)
+          const seenPortsInOdin = new Set<string>();
           for (const [key, data] of Object.entries(next)) {
             const isOdinActive = odinList.includes(key) || (data.port && odinList.includes(data.port));
             const isAdbActive = data.serial ? list.includes(data.serial) : false;
-            if (!isOdinActive && !isAdbActive && data.status !== "Flashing...") {
+
+            // Fix: Remove stale entries that are not in current odinList, or if device booted back up into ADB mode and is Ready
+            if ((!isOdinActive && !isAdbActive && data.status !== "Flashing...") || (!isOdinActive && isAdbActive && data.status === "Ready")) {
               delete next[key];
               changed = true;
+              continue;
+            }
+
+            // Fix: Deduplicate entries with the same port (keep the one that's in odinList)
+            if (data.port) {
+              if (seenPortsInOdin.has(data.port)) {
+                if (!odinList.includes(key)) {
+                  delete next[key];
+                  changed = true;
+                  continue;
+                }
+              }
+              seenPortsInOdin.add(data.port);
             }
           }
           return changed ? next : prev;
@@ -854,6 +1015,54 @@ export default function App() {
     });
 
     return [...new Set(matched.map(port => port.port_name))];
+  };
+
+  const getAllDeviceAliases = (targetIds: string[]): string[] => {
+    const aliases = new Set<string>();
+    targetIds.forEach(id => {
+      aliases.add(id);
+      const m = mergedDevices.find(d => d.id === id || d.odinKey === id || d.serial === id || d.port === id);
+      if (m) {
+        if (m.id) aliases.add(m.id);
+        if (m.serial) aliases.add(m.serial);
+        if (m.port) aliases.add(m.port);
+        if (m.odinKey) aliases.add(m.odinKey);
+      }
+    });
+    return [...aliases];
+  };
+
+  const broadcastDeviceStepStatus = async (status: string | null, targetSerials?: string[]) => {
+    const targets = targetSerials && targetSerials.length > 0 ? targetSerials : selectedDevices;
+    const allAliases = getAllDeviceAliases(targets);
+    const statusMap: Record<string, string> = {};
+
+    if (status) {
+      allAliases.forEach(key => {
+        statusMap[key] = status;
+      });
+      setDeviceStepStatuses(prev => ({ ...prev, ...statusMap }));
+      try {
+        await invoke("save_shared_ui_state", {
+          automation_state: { device_statuses: { ...deviceStepStatuses, ...statusMap } }
+        });
+        if (allAliases.length > 0) {
+          await invoke("mark_busy", { serials: allAliases });
+        }
+      } catch {}
+    } else {
+      setDeviceStepStatuses({});
+      try {
+        await invoke("save_shared_ui_state", {
+          automation_state: { device_statuses: {} }
+        });
+        if (allAliases.length > 0) {
+          await invoke("clear_busy", { serials: allAliases });
+        } else {
+          await invoke("reset_busy_devices");
+        }
+      } catch {}
+    }
   };
 
   const skipWz = async (isSequence = false, manualSelection?: string[]) => {
@@ -1183,6 +1392,7 @@ export default function App() {
             } else {
               appendLog("✓ Odin Flash Selesai.");
               appendLog("⏳ Device booting up, menunggu sampai koneksi stabil (Maksimal 10 Menit)...");
+              await broadcastDeviceStepStatus("Device Booting...", activeSelection);
 
               const expectedPorts = mergedDevices.filter(d => activeSelection.includes(d.id) && d.port).map(d => d.port as string);
               const adbReady = await waitForAdb(600000, activeSelection, preFlashAdb, expectedPorts);
@@ -1225,6 +1435,7 @@ export default function App() {
       if (seqSkipWz) {
         if (stopRequested.current) throw new Error("STOP");
         setCurrentStep(1);
+        await broadcastDeviceStepStatus("Skip Wizard...", currentSelection);
         await skipWz(true, currentSelection);
         await delay(2000);
       }
@@ -1232,6 +1443,7 @@ export default function App() {
       if (seqGba) {
         if (stopRequested.current) throw new Error("STOP");
         setCurrentStep(2);
+        await broadcastDeviceStepStatus("Setup GBA...", currentSelection);
         await setupPrecondition(true, currentSelection);
         await delay(2000);
       }
@@ -1239,6 +1451,7 @@ export default function App() {
       if (seqWifi) {
         if (stopRequested.current) throw new Error("STOP");
         setCurrentStep(3);
+        await broadcastDeviceStepStatus("WiFi Connect...", currentSelection);
         await connectWifi(true, currentSelection);
         await delay(2000);
       }
@@ -1255,13 +1468,14 @@ export default function App() {
     } finally {
       setCurrentStep(null);
       setLoading(false);
-      // Clear busy at the end
-      try { await invoke("clear_busy", { serials: activeSelection }); } catch { }
-      // Clear completed status labels when master sequence flow finishes
+      setSelectedDevices([]); // ponytail: Uncheck all devices after master sequence completes
+      setDeviceStepStatuses({});
+      setOdinDeviceStates({});
       try {
         odinRef.current?.resetAllStatuses();
-        setOdinDeviceStates({});
-        await invoke("save_shared_ui_state", { odin_devices: {} });
+      } catch { }
+      try {
+        await invoke("reset_busy_devices");
       } catch { }
       setTimeout(() => {
         refreshDevices(true);
@@ -1310,21 +1524,42 @@ export default function App() {
     });
 
     // 2. Add Odin devices
+    // Track odin paths we've already processed to avoid duplicates from stale entries
+    const processedOdinPaths = new Set<string>();
     Object.entries(odinDeviceStates).forEach(([path, data]) => {
       let serial = data.serial;
       let model = data.model;
       let port = data.port || path;
 
-      // Lookup model and serial from deviceDetails if missing or UNKNOWN MODEL
-      if ((!serial || !model || model === "UNKNOWN MODEL") && (port || path)) {
+      // Fix: Skip duplicate Odin entries for the same port (stale USB path after re-enumeration)
+      if (port && processedOdinPaths.has(port)) return;
+      processedOdinPaths.add(port);
+
+      // Fix: Check both case variants of "Unknown Model" since normalizeModelName returns mixed case
+      const isUnknownModel = !model || model === "Unknown Model" || model === "UNKNOWN MODEL";
+
+      // Lookup model and serial from deviceDetails if missing or unknown
+      if ((!serial || isUnknownModel) && (port || path)) {
         const cached = Object.values(deviceDetails).find(d => d.usb_port === port || d.usb_port === path || (serial && d.serial === serial));
         if (cached) {
-          if (!model || model === "UNKNOWN MODEL") model = cached.model || cached._model || cached['ro.product.model'];
+          if (isUnknownModel) model = cached.model || cached._model || cached['ro.product.model'];
           if (!serial) serial = cached.serial;
         }
       }
 
-      const normalizedModel = normalizeModelName(model);
+      // Fix: Fallback to port_history localStorage if still unknown
+      if ((!serial || !model || model === "Unknown Model") && port) {
+        try {
+          const history = localStorage.getItem('port_history_' + port);
+          if (history) {
+            const parsed = JSON.parse(history);
+            if (!serial && parsed.serial) serial = parsed.serial;
+            if ((!model || model === "Unknown Model") && parsed.model) model = parsed.model;
+          }
+        } catch {}
+      }
+
+      const normalizedModel = normalizeModelName(model) || "ODIN DEVICE";
       const isSeenSerial = Boolean(serial && seenSerials.has(serial));
       const isSeenPort = Boolean(port && seenPorts.has(port));
 
@@ -1388,7 +1623,7 @@ export default function App() {
   const groupedDevices = useMemo(() => {
     const groups = new Map<string, { model: string; devices: DeviceView[] }>();
     mergedDevices.forEach(device => {
-      const model = normalizeModelName(device.model);
+      const model = normalizeModelName(device.model) || "ODIN DEVICE";
       const key = model.toLowerCase();
       if (!groups.has(key)) groups.set(key, { model, devices: [] });
       groups.get(key)!.devices.push({
@@ -1396,8 +1631,20 @@ export default function App() {
         model,
       });
     });
-    return [...groups.values()];
-  }, [mergedDevices]);
+
+    const result = [...groups.values()];
+
+    // ponytail: Sort matching model groups & glow outline to the VERY TOP
+    return result.sort((a, b) => {
+      const aMatch = isFirmwareForModel(apFileName, a.model);
+      const bMatch = isFirmwareForModel(apFileName, b.model);
+
+      if (aMatch !== bMatch) {
+        return aMatch ? -1 : 1;
+      }
+      return a.model.localeCompare(b.model);
+    });
+  }, [mergedDevices, apFileName]);
 
   const selectAll = () => {
     setSelectedDevices(selectedDevices.length === availableDeviceIds.length ? [] : [...availableDeviceIds]);
@@ -1718,6 +1965,7 @@ export default function App() {
                 selectedSerials={[...selectedDevices, ...mergedDevices.filter(d => selectedDevices.includes(d.id) && d.port).map(d => d.port as string)]}
                 setSelectedSerials={setSelectedDevices}
                 odinDevices={odinDeviceStates}
+                deviceDetails={deviceDetails}
                 onDevicesUpdate={setOdinDeviceStates}
                 sharedFirmwareFiles={sharedFirmwareFiles || undefined}
                 onOdinFlashProgress={(flashing, progress) => {
@@ -1808,11 +2056,26 @@ export default function App() {
                         </button>
                         {group.devices.map((item) => {
                           const id = item.id;
-                          const odinData = item.odinKey ? odinDeviceStates[item.odinKey] : undefined;
-                          const isOdinMode = item.type === "odin" || odinData !== undefined;
-                          const isFlashing = odinData?.status === "Flashing...";
+                          const odinData = (item.odinKey ? odinDeviceStates[item.odinKey] : undefined) ||
+                                           (item.serial ? odinDeviceStates[item.serial] : undefined) ||
+                                           (item.id ? odinDeviceStates[item.id] : undefined) ||
+                                           (item.port ? odinDeviceStates[item.port] : undefined);
+
+                          const stepStatus = (item.serial && deviceStepStatuses[item.serial]) ||
+                                             (item.port && deviceStepStatuses[item.port]) ||
+                                             (item.id && deviceStepStatuses[item.id]) ||
+                                             (item.odinKey && deviceStepStatuses[item.odinKey]);
+
+                          const isOdinMode = item.type === "odin" || (odinData !== undefined && odinData.status !== "Ready");
+                          const isFlashing = odinData?.status === "Flashing..." || Boolean(stepStatus && (stepStatus.includes("Flashing") || stepStatus.includes("Odin")));
                           const isPass = odinData?.status === "Pass";
                           const isFail = odinData?.status === "Fail";
+
+                          const isBusy = busyDevices.includes(id) ||
+                                         Boolean(item.serial && busyDevices.includes(item.serial)) ||
+                                         Boolean(item.port && busyDevices.includes(item.port)) ||
+                                         Boolean(item.odinKey && busyDevices.includes(item.odinKey));
+
                           const isSelected = selectedDevices.includes(id) ||
                             Boolean(item.serial && selectedDevices.includes(item.serial)) ||
                             Boolean(item.odinKey && selectedDevices.includes(item.odinKey));
@@ -1820,20 +2083,18 @@ export default function App() {
                           const isModelMatch = isFirmwareForModel(apFileName, item.model || "");
 
                           let borderStyle = "";
-                          if (busyDevices.includes(id) && !isSelected) {
-                            borderStyle = "opacity-75 cursor-not-allowed border-red-500/20 bg-red-500/5 shadow-[0_0_10px_rgba(239,68,68,0.1)]";
-                          } else if (isFlashing) {
+                          if (isFlashing) {
                             borderStyle = "border-blue-500 bg-blue-500/10 shadow-[0_0_15px_rgba(59,130,246,0.3)]";
+                          } else if (isBusy && !isSelected) {
+                            borderStyle = "opacity-75 cursor-not-allowed border-red-500/20 bg-red-500/5 shadow-[0_0_10px_rgba(239,68,68,0.1)]";
                           } else if (isPass) {
                             borderStyle = "border-green-500 bg-green-500/10 shadow-[0_0_15px_rgba(34,197,94,0.3)]";
                           } else if (isFail) {
                             borderStyle = "border-red-500 bg-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.3)]";
                           } else if (isModelMatch) {
                             if (isSelected) {
-                              // Matching model & CHECKED: Blinking White Outline
                               borderStyle = "border-2 border-white bg-white/10 shadow-[0_0_20px_rgba(255,255,255,0.8)] animate-pulse";
                             } else {
-                              // Matching model & UNCHECKED: Regular Amber Outline
                               borderStyle = "border-2 border-amber-500/90 bg-amber-500/5 shadow-[0_0_15px_rgba(245,158,11,0.4)]";
                             }
                           } else if (isSelected) {
@@ -1845,8 +2106,8 @@ export default function App() {
                           return (
                             <div
                               key={id}
-                              onClick={() => !busyDevices.includes(id) && toggleDevice(id, item.serial, item.odinKey, item.port)}
-                              className={`h-[96px] shrink-0 p-4 rounded-xl border transition-all cursor-pointer relative overflow-hidden ${borderStyle}`}
+                              onClick={() => !isBusy && toggleDevice(id, item.serial, item.odinKey, item.port)}
+                              className={`h-[96px] shrink-0 p-4 rounded-xl border transition-all cursor-pointer relative overflow-hidden ${borderStyle} ${isBusy ? 'pointer-events-none' : ''}`}
                             >
                               {isFlashing && odinData && (
                                 <div
@@ -1864,22 +2125,34 @@ export default function App() {
                                       <span className="text-[16px] font-bold truncate pr-1 leading-tight">
                                         {item.model || id}
                                       </span>
-                                      {isOdinMode && (
-                                        <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded ${isFlashing ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30 animate-pulse' :
-                                            isPass ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
-                                              isFail ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                                                'bg-blue-500/10 text-blue-400/80 border border-blue-500/20'
-                                          }`}>
-                                          {isFlashing ? `Flashing ${odinData?.progress}%` : isPass ? "Odin Completed" : odinData?.status || "Odin Mode"}
-                                        </span>
-                                      )}
+                                      {(() => {
+                                        if (stepStatus) {
+                                          return (
+                                            <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse">
+                                              {stepStatus}
+                                            </span>
+                                          );
+                                        }
+                                        if (isOdinMode) {
+                                          return (
+                                            <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded ${isFlashing ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30 animate-pulse' :
+                                                isPass ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                                                  isFail ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                                                    'bg-blue-500/10 text-blue-400/80 border border-blue-500/20'
+                                              }`}>
+                                              {isFlashing ? `Flashing ${odinData?.progress || 0}%` : isPass ? "Odin Completed" : odinData?.status || "Odin Mode"}
+                                            </span>
+                                          );
+                                        }
+                                        return null;
+                                      })()}
                                     </div>
                                     <span className="text-[11px] text-white/25 font-mono tracking-tight mt-0.5">
-                                      {item.serial ? `SN: ${item.serial}` : 'SN: Unknown'} &bull; {item.port || 'Unknown Port'}
+                                      SN: {item.serial || 'N/A'} • USB:{item.port || 'N/A'}
                                     </span>
                                   </div>
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    {busyDevices.includes(id) && <span className="bg-red-600 px-2 py-0.5 rounded text-[10px] font-black tracking-[0.15em] text-white shadow-[0_0_10px_rgba(220,38,38,0.5)]">BUSY</span>}
+                                  <div className="flex items-center gap-3">
+                                    {isBusy && <span className="bg-red-600 px-2 py-0.5 rounded text-[10px] font-black tracking-[0.15em] text-white shadow-[0_0_10px_rgba(220,38,38,0.5)]">BUSY</span>}
                                     <div className={`w-6 h-6 border flex items-center justify-center transition-all ${
                                       isFlashing || (loading && isSelected)
                                         ? 'bg-blue-500/20 border-blue-500'
@@ -1921,7 +2194,7 @@ export default function App() {
                       <span className={`text-[10px] font-black uppercase tracking-widest`}>Skip WZ</span>
                       <ChevronRight className="w-3 h-3" />
                     </div>
-                    <div className={`flex items-center gap-2 transition-all duration-500 ${!seqGba ? 'hidden' : ''} ${currentStep === 2 ? 'opacity-100 text-purple-400 drop-shadow-[0_0_8px_rgba(192,132,252,0.8)]' : (currentStep && currentStep > 2 ? 'opacity-50 text-white' : 'opacity-30 text-white')}`}>
+                    <div className={`flex items-center gap-2 transition-all duration-500 ${!seqGba ? 'hidden' : ''} ${currentStep === 2 ? 'opacity-100 text-purple-400 drop-shadow-[0_0_8px_rgba(192,132,252,0.8)]' : (currentStep !== null && currentStep > 2 ? 'opacity-50 text-white' : 'opacity-30 text-white')}`}>
                       <span className={`text-[10px] font-black uppercase tracking-widest`}>Setup GBA</span>
                       <ChevronRight className="w-3 h-3" />
                     </div>
@@ -1933,23 +2206,41 @@ export default function App() {
 
                 <div className="flex flex-col gap-4 md:gap-8">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-6">
-                    <div onClick={toggleSeqOdin} className={`p-3 md:p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-2 md:gap-4 ${loading ? 'cursor-not-allowed opacity-40 pointer-events-none' : 'cursor-pointer'} ${seqOdin ? 'border-orange-500 bg-orange-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}>
-                      <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqOdin ? 'bg-orange-500 border-orange-500 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'border-white/20'}`}>
-                        {seqOdin && <Check className="w-5 h-5 text-white" strokeWidth={4} />}
+                    <div onClick={toggleSeqOdin} className={`p-3 md:p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-2 md:gap-4 ${loading ? 'pointer-events-none' : 'cursor-pointer'} ${seqOdin ? 'border-orange-500 bg-orange-500/10' : 'border-[#333] bg-black/40'} ${loading && currentStep === 0 ? 'opacity-100 ring-2 ring-orange-500/50 shadow-[0_0_20px_rgba(251,146,60,0.4)] scale-[1.02]' : loading ? (seqOdin ? (currentStep !== null && currentStep > 0 ? 'opacity-90' : 'opacity-70') : 'opacity-30') : 'hover:border-white/20'}`}>
+                      <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqOdin || (loading && currentStep === 0) ? 'bg-orange-500 border-orange-500 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'border-white/20'}`}>
+                        {loading && currentStep === 0 ? (
+                          <RefreshCw className="w-4 h-4 text-white animate-spin" />
+                        ) : loading && currentStep !== null && currentStep < 0 && seqOdin ? (
+                          <RefreshCw className="w-4 h-4 text-orange-300/80 animate-spin" />
+                        ) : seqOdin ? (
+                          <Check className="w-5 h-5 text-white" strokeWidth={4} />
+                        ) : null}
                       </div>
-                      <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqOdin ? 'text-orange-400' : 'text-white/40'}`}>Odin Flash</span>
+                      <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqOdin || (loading && currentStep === 0) ? 'text-orange-400' : 'text-white/40'}`}>Odin Flash</span>
                     </div>
-                    <div onClick={toggleSeqSkipWz} className={`p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-4 ${loading ? 'cursor-not-allowed opacity-40 pointer-events-none' : 'cursor-pointer'} ${seqSkipWz ? 'border-blue-500 bg-blue-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}>
-                      <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqSkipWz ? 'bg-blue-500 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.5)]' : 'border-white/20'}`}>
-                        {seqSkipWz && <Check className="w-5 h-5 text-white" strokeWidth={4} />}
+                    <div onClick={toggleSeqSkipWz} className={`p-3 md:p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-2 md:gap-4 ${loading ? 'pointer-events-none' : 'cursor-pointer'} ${seqSkipWz ? 'border-blue-500 bg-blue-500/10' : 'border-[#333] bg-black/40'} ${loading && currentStep === 1 ? 'opacity-100 ring-2 ring-blue-500/50 shadow-[0_0_20px_rgba(59,130,246,0.4)] scale-[1.02]' : loading ? (seqSkipWz ? (currentStep !== null && currentStep > 1 ? 'opacity-90' : 'opacity-70') : 'opacity-30') : 'hover:border-white/20'}`}>
+                      <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqSkipWz || (loading && currentStep === 1) ? 'bg-blue-500 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.5)]' : 'border-white/20'}`}>
+                        {loading && currentStep === 1 ? (
+                          <RefreshCw className="w-4 h-4 text-white animate-spin" />
+                        ) : loading && currentStep !== null && currentStep < 1 && seqSkipWz ? (
+                          <RefreshCw className="w-4 h-4 text-blue-300/80 animate-spin" />
+                        ) : seqSkipWz ? (
+                          <Check className="w-5 h-5 text-white" strokeWidth={4} />
+                        ) : null}
                       </div>
-                      <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqSkipWz ? 'text-blue-400' : 'text-white/40'}`}>Skip WZ</span>
+                      <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqSkipWz || (loading && currentStep === 1) ? 'text-blue-400' : 'text-white/40'}`}>Skip WZ</span>
                     </div>
-                    <div onClick={toggleSeqGba} className={`p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-4 ${loading ? 'cursor-not-allowed opacity-40 pointer-events-none' : 'cursor-pointer'} ${seqGba ? 'border-purple-500 bg-purple-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}>
-                      <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqGba ? 'bg-purple-500 border-purple-500 shadow-[0_0_15px_rgba(168,85,247,0.5)]' : 'border-white/20'}`}>
-                        {seqGba && <Check className="w-5 h-5 text-white" strokeWidth={4} />}
+                    <div onClick={toggleSeqGba} className={`p-3 md:p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-2 md:gap-4 ${loading ? 'pointer-events-none' : 'cursor-pointer'} ${seqGba ? 'border-purple-500 bg-purple-500/10' : 'border-[#333] bg-black/40'} ${loading && currentStep === 2 ? 'opacity-100 ring-2 ring-purple-500/50 shadow-[0_0_20px_rgba(168,85,247,0.4)] scale-[1.02]' : loading ? (seqGba ? (currentStep !== null && currentStep > 2 ? 'opacity-90' : 'opacity-70') : 'opacity-30') : 'hover:border-white/20'}`}>
+                      <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqGba || (loading && currentStep === 2) ? 'bg-purple-500 border-purple-500 shadow-[0_0_15px_rgba(168,85,247,0.5)]' : 'border-white/20'}`}>
+                        {loading && currentStep === 2 ? (
+                          <RefreshCw className="w-4 h-4 text-white animate-spin" />
+                        ) : loading && currentStep !== null && currentStep < 2 && seqGba ? (
+                          <RefreshCw className="w-4 h-4 text-purple-300/80 animate-spin" />
+                        ) : seqGba ? (
+                          <Check className="w-5 h-5 text-white" strokeWidth={4} />
+                        ) : null}
                       </div>
-                      <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqGba ? 'text-purple-400' : 'text-white/40'}`}>Setup GBA</span>
+                      <span className={`text-[11px] font-black uppercase tracking-widest text-center ${seqGba || (loading && currentStep === 2) ? 'text-purple-400' : 'text-white/40'}`}>Setup GBA</span>
                     </div>
                     <div
                       onClick={toggleSeqWifi}
@@ -1958,12 +2249,18 @@ export default function App() {
                         if (!loading) setShowWifiModal(true);
                       }}
                       title="Klik kiri: Toggle WiFi Connect | Klik kanan: Preset SSID & Password"
-                      className={`p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-4 relative group ${loading ? 'cursor-not-allowed opacity-40 pointer-events-none' : 'cursor-pointer'} ${seqWifi ? 'border-green-500 bg-green-500/10' : 'border-[#333] bg-black/40'}${loading ? '' : ' hover:border-white/20'}`}
+                      className={`p-3 md:p-6 border rounded-xl transition-all flex flex-col items-center justify-center gap-2 md:gap-4 relative group ${loading ? 'pointer-events-none' : 'cursor-pointer'} ${seqWifi ? 'border-green-500 bg-green-500/10' : 'border-[#333] bg-black/40'} ${loading && currentStep === 3 ? 'opacity-100 ring-2 ring-green-500/50 shadow-[0_0_20px_rgba(34,197,94,0.4)] scale-[1.02]' : loading ? (seqWifi ? (currentStep !== null && currentStep > 3 ? 'opacity-90' : 'opacity-70') : 'opacity-30') : 'hover:border-white/20'}`}
                     >
-                      <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqWifi ? 'bg-green-500 border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.5)]' : 'border-white/20'}`}>
-                        {seqWifi && <Check className="w-5 h-5 text-white" strokeWidth={4} />}
+                      <div className={`w-7 h-7 border rounded-md flex items-center justify-center transition-all ${seqWifi || (loading && currentStep === 3) ? 'bg-green-500 border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.5)]' : 'border-white/20'}`}>
+                        {loading && currentStep === 3 ? (
+                          <RefreshCw className="w-4 h-4 text-white animate-spin" />
+                        ) : loading && currentStep !== null && currentStep < 3 && seqWifi ? (
+                          <RefreshCw className="w-4 h-4 text-green-300/80 animate-spin" />
+                        ) : seqWifi ? (
+                          <Check className="w-5 h-5 text-white" strokeWidth={4} />
+                        ) : null}
                       </div>
-                      <span className={`text-[9px] md:text-[11px] font-black uppercase tracking-widest text-center ${seqWifi ? 'text-green-400' : 'text-white/40'}`}>WiFi Connect</span>
+                      <span className={`text-[9px] md:text-[11px] font-black uppercase tracking-widest text-center ${seqWifi || (loading && currentStep === 3) ? 'text-green-400' : 'text-white/40'}`}>WiFi Connect</span>
                     </div>
                   </div>
                   <button
@@ -1984,52 +2281,48 @@ export default function App() {
                         : undefined
                     }
                   >
-                    {seqOdin && isVerifyingMd5 ? (
-                      <RefreshCw className="w-5 md:w-6 h-5 md:h-6 animate-spin text-blue-500" />
-                    ) : loading && currentStep !== null ? (
-                      <RefreshCw className="w-5 md:w-6 h-5 md:h-6 animate-spin" />
-                    ) : (
-                      <Play className="w-5 md:w-6 h-5 md:h-6" />
-                    )}
-                    <span>
-                      {seqOdin && isVerifyingMd5
-                        ? `Verifying MD5 . . . ${Math.round(verifyMd5Progress)}%`
-                        : loading && currentStep !== null
-                        ? 'Memproses...'
-                        : 'Jalankan Automasi'}
-                    </span>
-                  </button>
-
-                  {/* AP / ALL Firmware Filename Badge */}
-                  <div className="flex items-center justify-center mt-1.5">
-                    <div
-                      className={`px-2 py-0.5 rounded-md border text-[10px] font-mono flex items-center gap-1.5 max-w-full overflow-hidden transition-all ${
-                        apFileName
-                          ? 'border-white/15 bg-white/10 text-white/70'
-                          : 'border-white/5 bg-white/5 text-white/25'
-                      }`}
-                      title={apFileName ? `File AP/ALL: ${apFileName}` : "Belum ada file AP/ALL yang dipilih pada tab Firmware"}
-                    >
-                      <FileText className={`w-3 h-3 shrink-0 ${apFileName ? 'text-white/50' : 'text-white/20'}`} />
-                      <span className="truncate">
-                        {apFileName ? `AP/ALL: ${apFileName}` : 'AP/ALL: Belum ada file'}
-                      </span>
+                    <div className="flex flex-col items-center justify-center leading-none gap-1 w-full px-2">
+                      <div className="flex items-center justify-center gap-2">
+                        {seqOdin && isVerifyingMd5 ? (
+                          <RefreshCw className="w-4 md:w-5 h-4 md:h-5 animate-spin text-blue-500" />
+                        ) : loading && currentStep !== null ? (
+                          <RefreshCw className="w-4 md:w-5 h-4 md:h-5 animate-spin" />
+                        ) : (
+                          <Play className="w-4 md:w-5 h-4 md:h-5" />
+                        )}
+                        <span>
+                          {seqOdin && isVerifyingMd5
+                            ? `Verifying MD5 . . . ${Math.round(verifyMd5Progress)}%`
+                            : loading && currentStep !== null
+                            ? 'Memproses...'
+                            : 'Jalankan Automasi'}
+                        </span>
+                      </div>
+                      {apFileName && !isVerifyingMd5 && (
+                        <span className={`text-[9px] md:text-[10px] font-mono tracking-tight font-semibold break-all text-center normal-case mt-0.5 ${
+                          loading
+                            ? 'text-amber-400/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]'
+                            : 'text-black/75 group-hover:text-black'
+                        }`}>
+                          {apFileName}
+                        </span>
+                      )}
                     </div>
-                  </div>
+                  </button>
                 </div>
                 {loading && currentStep !== null && <div className="absolute bottom-0 left-0 h-1 bg-blue-500 w-full animate-pulse"></div>}
               </div>
 
               {/* System Log */}
-              <div className="flex-1 bg-black border border-[#2a2a2a] rounded-xl md:rounded-2xl flex flex-col min-h-[250px] md:min-h-0 overflow-hidden shadow-lg mt-2 md:mt-0">
-                <div className="flex items-center justify-between px-4 md:px-8 h-8 bg-white/5 border-b border-[#2a2a2a]">
+              <div className="bg-black border border-[#2a2a2a] rounded-xl md:rounded-2xl flex flex-col h-[260px] md:h-auto md:flex-1 min-h-0 overflow-hidden shadow-lg mt-2 md:mt-0">
+                <div className="flex items-center justify-between px-4 md:px-8 h-8 bg-white/5 border-b border-[#2a2a2a] shrink-0">
                   <div className="flex-1 flex items-center justify-center gap-3">
                     <Terminal className="w-4 h-4 text-blue-500" />
                     <span className="text-[11px] font-black uppercase tracking-widest">Log Sistem</span>
                   </div>
                   <button onClick={() => setLogs([])} className="text-[10px] font-black text-white/20 hover:text-white px-2 md:px-3 py-1 bg-white/5 rounded transition-all">CLEAR</button>
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 md:p-6 font-mono text-[11px] md:text-[13px] select-text leading-relaxed custom-scrollbar">
+                <div ref={logContainerRef} className="flex-1 overflow-y-auto p-4 md:p-6 font-mono text-[11px] md:text-[13px] select-text leading-relaxed custom-scrollbar">
                   {logs.length === 0 ? (
                     <div className="h-full flex items-center justify-center text-white/5 uppercase tracking-[0.5em] font-black italic">Ready</div>
                   ) : (
@@ -2048,7 +2341,6 @@ export default function App() {
                       );
                     })
                   )}
-                  <div ref={logEndRef} />
                 </div>
               </div>
             </div>

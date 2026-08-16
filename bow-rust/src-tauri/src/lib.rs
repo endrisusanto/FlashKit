@@ -641,6 +641,7 @@ fn bridge_window(app: &AppHandle) -> Result<WebviewWindow, String> {
 fn bridge_invoke(app: AppHandle, payload: BridgeInvokeRequest) -> String {
     match payload.command.as_str() {
         "get_busy_devices" => bridge_ok(get_busy_devices()),
+        "get_device_statuses" => bridge_ok(get_device_statuses()),
         "get_device_cache" => bridge_ok(get_device_cache()),
         "get_shared_ui_state" => bridge_ok(get_shared_ui_state()),
         "save_shared_ui_state" => {
@@ -1491,9 +1492,7 @@ fn reload_udev_and_adb_blocking() -> Result<String, String> {
         let _ = Command::new("udevadm").args(["trigger"]).output();
     }
 
-    let _ = Command::new(&adb_path).arg("kill-server").output();
-    let _ = Command::new(&adb_path).arg("start-server").output();
-
+    // ponytail: Safe refresh using adb devices without killing adb server to protect active testing sessions
     let output = Command::new(&adb_path).arg("devices").output();
     match output {
         Ok(out) => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
@@ -1627,6 +1626,8 @@ struct BusyState {
     busy_devices: std::collections::HashSet<String>,
     adb_devices: Vec<CachedAdbDevice>,
     updated_at_ms: u128,
+    #[serde(default)]
+    device_statuses: serde_json::Value,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -1660,6 +1661,8 @@ struct SharedAutomationState {
     current_step: Option<u32>,
     is_stopping: bool,
     logs: Vec<String>,
+    #[serde(default)]
+    device_statuses: serde_json::Value,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
@@ -1671,6 +1674,8 @@ struct SharedUiState {
     automation_state: SharedAutomationState,
     #[serde(default)]
     odin_devices: serde_json::Value,
+    #[serde(default)]
+    busy_devices: Vec<String>,
     #[serde(default)]
     custom_node_name: Option<String>,
     updated_at_ms: u128,
@@ -1694,7 +1699,12 @@ fn read_shared_ui_state() -> SharedUiState {
         .and_then(|data| serde_json::from_str::<SharedUiState>(&data).ok())
         .unwrap_or_default();
 
-    // ponytail: Never load historical log text or stale stopping/loading/flashing flags from disk file
+    // ponytail: Load device_statuses from busy.json so all instances/web get step status badges
+    let busy = read_busy_state();
+    if !busy.device_statuses.is_null() && busy.device_statuses.is_object() {
+        state.automation_state.device_statuses = busy.device_statuses.clone();
+    }
+
     state.automation_state.logs.clear();
     state.automation_state.is_stopping = false;
     state.automation_state.loading = false;
@@ -1788,6 +1798,11 @@ fn save_shared_ui_state(
     }
     state.updated_at_ms = now_ms();
     
+    // ponytail: Save device_statuses to busy.json so all instances/web get step status badges
+    let mut busy = read_busy_state();
+    busy.device_statuses = state.automation_state.device_statuses.clone();
+    write_busy_state(&busy);
+
     // Save to memory cache
     *guard = Some(state.clone());
     
@@ -1835,6 +1850,9 @@ fn merge_automation_state(state: &mut SharedAutomationState, patch: serde_json::
     {
         state.logs = logs;
     }
+    if let Some(statuses) = patch.get("device_statuses") {
+        state.device_statuses = statuses.clone();
+    }
 }
 
 fn read_busy_state() -> BusyState {
@@ -1866,8 +1884,20 @@ fn device_cache_from_state(state: &BusyState) -> DeviceCache {
 }
 
 fn emit_busy_state(app: &AppHandle) {
+    let busy = read_busy_state();
     let devices = get_busy_devices();
+    let statuses = busy.device_statuses.clone();
     let _ = app.emit("busy-state-updated", devices.clone());
+    let _ = app.emit("device-statuses-updated", statuses.clone());
+
+    // ponytail: sync busy_devices into SharedUiState for real-time global broadcast across all clients
+    let mut ui_state = read_shared_ui_state();
+    ui_state.busy_devices = devices.clone();
+    ui_state.updated_at_ms = now_ms();
+    write_shared_ui_state(&ui_state);
+    broadcast_shared_ui_state(&ui_state);
+    let _ = app.emit("shared-ui-updated", ui_state.clone());
+
     if let Ok(serialized) = serde_json::to_string(&IpcMessage::BusyState { devices }) {
         send_ipc(serialized);
     }
@@ -1895,7 +1925,11 @@ fn clear_busy(app: AppHandle, serials: Vec<String>) {
     let mut state = read_busy_state();
     for s in &serials {
         state.busy_devices.remove(s);
+        if let Some(obj) = state.device_statuses.as_object_mut() {
+            obj.remove(s);
+        }
     }
+    state.updated_at_ms = now_ms();
     write_busy_state(&state);
     emit_busy_state(&app);
 }
@@ -1906,10 +1940,16 @@ fn get_busy_devices() -> Vec<String> {
 }
 
 #[tauri::command]
+fn get_device_statuses() -> serde_json::Value {
+    read_busy_state().device_statuses
+}
+
+#[tauri::command]
 fn reset_busy_devices(app: AppHandle) {
     let mut state = read_busy_state();
     state.busy_devices.clear();
     state.adb_devices.clear();
+    state.device_statuses = serde_json::json!({});
     state.updated_at_ms = now_ms();
     write_busy_state(&state);
     emit_busy_state(&app);
@@ -1917,6 +1957,8 @@ fn reset_busy_devices(app: AppHandle) {
     let mut ui_state = read_shared_ui_state();
     ui_state.odin_devices = serde_json::json!({});
     ui_state.verify_state = serde_json::json!({});
+    ui_state.automation_state.device_statuses = serde_json::json!({});
+    ui_state.busy_devices.clear();
     ui_state.updated_at_ms = now_ms();
     write_shared_ui_state(&ui_state);
     let _ = app.emit("shared-ui-updated", ui_state.clone());
@@ -2152,6 +2194,7 @@ pub fn run() {
             mark_busy,
             clear_busy,
             get_busy_devices,
+            get_device_statuses,
             reset_busy_devices,
             reset_device_cache,
             save_device_cache,

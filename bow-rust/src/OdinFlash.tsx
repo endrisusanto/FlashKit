@@ -140,6 +140,7 @@ export interface OdinFlashProps {
   selectedSerials?: string[];
   setSelectedSerials?: React.Dispatch<React.SetStateAction<string[]>>;
   odinDevices?: Record<string, DeviceData>;
+  deviceDetails?: Record<string, any>;
   onDevicesUpdate?: (devices: Record<string, DeviceData>) => void;
   sharedFirmwareFiles?: SharedFirmwareFiles;
   onVerifyProgress?: (progress: number) => void;
@@ -149,7 +150,7 @@ export interface OdinFlashProps {
   isLeader: boolean;
 }
 
-const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, selectedSerials, setSelectedSerials, onDevicesUpdate, sharedFirmwareFiles, onVerifyProgress, onVerifyStateChange, onOdinFlashProgress, onApFileChange, isLeader }, ref) => {
+const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, selectedSerials, setSelectedSerials, deviceDetails, onDevicesUpdate, sharedFirmwareFiles, onVerifyProgress, onVerifyStateChange, onOdinFlashProgress, onApFileChange, isLeader }, ref) => {
   const desktopActive = isTauriRuntime();
   const invoke = <T,>(command: string, args?: Record<string, unknown>) =>
     desktopActive ? tauriInvoke<T>(command, args) : bridgeInvoke<T>(command, args);
@@ -168,6 +169,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   const [busyDevices, setBusyDevices] = useState<string[]>([]);
 
   const devicesRef = useRef(devices);
+  const deviceDetailsRef = useRef(deviceDetails);
   const isFlashingRef = useRef(isFlashing);
   const selectedSerialsRef = useRef(selectedSerials);
   const allSerialsRef = useRef(allSerials);
@@ -184,7 +186,8 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     isFlashingRef.current = isFlashing;
     selectedSerialsRef.current = selectedSerials;
     allSerialsRef.current = allSerials;
-  }, [isFlashing, selectedSerials, allSerials]);
+    deviceDetailsRef.current = deviceDetails;
+  }, [isFlashing, selectedSerials, allSerials, deviceDetails]);
 
   const applySharedFirmwareFiles = (state: SharedUiState) => {
     if (!state.firmware_files || state.updated_at_ms <= sharedUiSeenAt.current) return;
@@ -214,7 +217,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
         const next = { ...prev };
         for (const key of ["bl", "ap", "cp", "csc", "userdata"] as SlotKey[]) {
           const incomingPath = state.firmware_files[key] || "";
-          if (!incomingPath && prev[key].text) {
+          if (!incomingPath && prev[key].text && !prev[key].verifying) {
             next[key] = { text: "", progress: 0, verifying: false };
             changed = true;
           }
@@ -346,11 +349,9 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     cancelFlashing: cancelAllFlashing,
   }));
 
-  const lastSentDevicesRef = useRef<Record<string, DeviceData>>({});
   // Sync devices update back to parent
   useEffect(() => {
-    if (onDevicesUpdate && !sameDeviceMap(devices, lastSentDevicesRef.current)) {
-      lastSentDevicesRef.current = devices;
+    if (onDevicesUpdate) {
       onDevicesUpdate(devices);
     }
   }, [devices, onDevicesUpdate]);
@@ -385,12 +386,14 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     }
   }, [isFlashing, overallFlashProgress, onOdinFlashProgress]);
 
-  useEffect(() => {
-    if (!sharedUiHydrated.current || isFlashing) return;
-    if (sameDeviceMap(devices, devicesRef.current)) return;
-    if (!isLeader) return;
+  const lastSavedOdinDevicesRef = useRef<Record<string, DeviceData>>({});
 
-    devicesRef.current = devices;
+  useEffect(() => {
+    if (!sharedUiHydrated.current) return;
+    if (sameDeviceMap(devices, lastSavedOdinDevicesRef.current)) return;
+    if (!desktopActive && !isLeader) return;
+
+    lastSavedOdinDevicesRef.current = devices;
     const timer = window.setTimeout(async () => {
       try {
         const state = await invoke<SharedUiState>("save_shared_ui_state", { odin_devices: devices });
@@ -398,7 +401,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       } catch { }
     }, 150);
     return () => window.clearTimeout(timer);
-  }, [devices, isFlashing]);
+  }, [devices, isLeader, desktopActive]);
 
   useEffect(() => {
     if (onVerifyProgress) {
@@ -469,7 +472,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
         if (isCurrentAdb && (updated[key].status === "Pass" || updated[key].status === "Fail")) {
           // Device booted back up into ADB mode: reset status to Ready!
           updated[key] = { ...updated[key], status: "Ready", progress: 0 };
-        } else if (!isCurrentOdin && !isCurrentAdb && !isFlashingRef.current) {
+        } else if (!isCurrentOdin && !isCurrentAdb && !isFlashingRef.current && updated[key].status !== "Ready") {
           delete updated[key];
         }
       }
@@ -499,6 +502,28 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                 if (!model && oldData.model) model = oldData.model;
               }
             }
+          }
+
+          if ((!serial || !model) && deviceDetailsRef.current) {
+            const cached = Object.values(deviceDetailsRef.current).find((d: any) =>
+              (port && d.usb_port === port) || (dev && d.usb_port === dev) || (serial && d.serial === serial)
+            );
+            if (cached) {
+              if (!model) model = cached.model || cached._model || cached['ro.product.model'];
+              if (!serial) serial = cached.serial;
+            }
+          }
+
+          // Fix: Fallback to port_history localStorage for model/serial recovery after download mode reboot
+          if (!serial || !model) {
+            try {
+              const history = localStorage.getItem('port_history_' + port);
+              if (history) {
+                const parsed = JSON.parse(history);
+                if (!serial && parsed.serial) serial = parsed.serial;
+                if (!model && parsed.model) model = parsed.model;
+              }
+            } catch {}
           }
 
           const isSelected = Boolean(
@@ -605,7 +630,6 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
             const dev = next[key];
             const adbSerialForThisIndex = allSerials[i];
             const shouldBeChecked = Boolean(
-              dev.checked ||
               selectedSerials.includes(key) ||
               (dev.port && selectedSerials.includes(dev.port)) ||
               (adbSerialForThisIndex && selectedSerials.includes(adbSerialForThisIndex))
@@ -1126,7 +1150,14 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   const readyToFlashCount = Object.values(devices).filter(d => d.checked && d.status !== "Flashing...").length;
   const anyFlashing = Object.values(devices).some(d => d.status === "Flashing...");
   const firmwareReadonly = isFlashing;
-  const visibleDevices = Object.entries(devices);
+  const visibleDevices = useMemo(() => {
+    return Object.entries(devices).sort(([devA, dataA], [devB, dataB]) => {
+      const matchA = isFirmwareForModel(apFilename, dataA.model || "");
+      const matchB = isFirmwareForModel(apFilename, dataB.model || "");
+      if (matchA !== matchB) return matchA ? -1 : 1;
+      return devA.localeCompare(devB);
+    });
+  }, [devices, apFilename]);
 
   return (
     <div className="odin-container">
