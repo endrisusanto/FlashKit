@@ -129,7 +129,7 @@ git tag "$NEXT_TAG"
 echo "[release] Pushing branch..."
 git push "$REMOTE" "HEAD:$BRANCH"
 
-echo "[release] Pushing tag to trigger GitHub Actions release build..."
+echo "[release] Pushing tag to trigger GitHub Actions (Latest Release + MSI)..."
 git push "$REMOTE" "$NEXT_TAG"
 
-echo "[release] Done: $NEXT_TAG"
+echo "[release] Done: $NEXT_TAG (GitHub Actions will publish as Latest Release with MSI & DEB assets)"

@@ -18,7 +18,7 @@ on:
       draft:
         description: Create release as draft
         type: boolean
-        default: true
+        default: false
       prerelease:
         description: Mark release as prerelease
         type: boolean
@@ -74,7 +74,7 @@ jobs:
         id: create-release
         uses: softprops/action-gh-release@v2
         with:
-          draft: ${{ github.event_name == 'push' && true || inputs.draft }}
+          draft: ${{ github.event_name == 'push' && false || inputs.draft }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
           name: "FlashKit ${{ github.event_name == 'push' && github.ref_name || needs.bump-version.outputs.tag_name }}"
           tag_name: ${{ github.event_name == 'push' && github.ref_name || needs.bump-version.outputs.tag_name }}
@@ -126,6 +126,6 @@ jobs:
           projectPath: ./bow-rust
           tagName: ${{ github.event_name == 'push' && github.ref_name || needs.bump-version.outputs.tag_name }}
           releaseName: "FlashKit ${{ github.event_name == 'push' && github.ref_name || needs.bump-version.outputs.tag_name }}"
-          releaseDraft: ${{ github.event_name == 'push' && true || inputs.draft }}
+          releaseDraft: ${{ github.event_name == 'push' && false || inputs.draft }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
-          args: ${{ matrix.platform == 'windows-latest' && '--bundles nsis' || '--bundles deb,rpm,appimage' }}
+          args: ${{ matrix.platform == 'windows-latest' && '--bundles msi,nsis' || '--bundles deb,rpm,appimage' }}

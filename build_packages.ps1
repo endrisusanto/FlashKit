@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
   [string]$Target = 'x86_64-pc-windows-msvc',
-  [ValidateSet('msi', 'nsis', 'nsis,msi')]
-  [string]$Bundles = 'msi'
+  [ValidateSet('msi', 'nsis', 'msi,nsis', 'nsis,msi')]
+  [string]$Bundles = 'msi,nsis'
 )
 
 $ErrorActionPreference = 'Stop'

@@ -4,8 +4,8 @@ param(
   [string]$Bump = 'patch',
   [string]$CommitMessage = 'Release next version',
   [string]$Target = 'x86_64-pc-windows-msvc',
-  [ValidateSet('nsis', 'msi', 'nsis,msi')]
-  [string]$Bundles = 'msi' # ponytail: default to msi
+  [ValidateSet('nsis', 'msi', 'msi,nsis', 'nsis,msi')]
+  [string]$Bundles = 'msi,nsis' # ponytail: default to msi,nsis
 )
 
 $ErrorActionPreference = 'Stop'
