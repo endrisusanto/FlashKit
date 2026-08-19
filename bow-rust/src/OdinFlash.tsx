@@ -240,34 +240,6 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     if (!desktopActive) return;
     const unlisten = listen<SharedUiState>("shared-ui-updated", (event) => {
       applySharedFirmwareFiles(event.payload);
-      if (event.payload.odin_devices && !isFlashingRef.current) {
-        const incoming = event.payload.odin_devices as Record<string, DeviceData>;
-        if (Object.keys(incoming).length === 0) {
-          setDevices(prev => {
-            let changed = false;
-            const next = { ...prev };
-            for (const k of Object.keys(next)) {
-              if (next[k].status === "Pass" || next[k].status === "Fail" || next[k].status === "Flashing...") {
-                next[k] = { ...next[k], status: "Ready", progress: 0 };
-                changed = true;
-              }
-            }
-            return changed ? next : prev;
-          });
-        } else {
-          setDevices(prev => {
-            let changed = false;
-            const next = { ...prev };
-            for (const [k, v] of Object.entries(incoming)) {
-              if (!next[k] || next[k].status !== v.status || next[k].progress !== v.progress) {
-                next[k] = { ...(next[k] || {}), ...v };
-                changed = true;
-              }
-            }
-            return changed ? next : prev;
-          });
-        }
-      }
     });
     return () => {
       unlisten.then(fn => fn());
@@ -419,7 +391,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   useEffect(() => {
     if (!sharedUiHydrated.current) return;
     if (sameDeviceMap(devices, lastSavedOdinDevicesRef.current)) return;
-    if (!isFlashingRef.current && !isFlashing && !isLeader) return;
+    if (!desktopActive && !isLeader) return;
 
     lastSavedOdinDevicesRef.current = devices;
     const timer = window.setTimeout(async () => {
@@ -427,9 +399,9 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
         const state = await invoke<SharedUiState>("save_shared_ui_state", { odin_devices: devices });
         sharedUiSeenAt.current = state.updated_at_ms;
       } catch { }
-    }, 100);
+    }, 150);
     return () => window.clearTimeout(timer);
-  }, [devices, isLeader, isFlashing]);
+  }, [devices, isLeader, desktopActive]);
 
   useEffect(() => {
     if (onVerifyProgress) {
