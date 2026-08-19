@@ -451,6 +451,9 @@ export default function App() {
     // Sync odin_devices globally to render FLASHING badges on device cards across all windows
     if (state.odin_devices) {
       const incomingOdin = state.odin_devices as Record<string, DeviceData>;
+      if (Object.keys(incomingOdin).length === 0) {
+        try { odinRef.current?.resetAllStatuses(); } catch { }
+      }
       setOdinDeviceStates(prev => sameDeviceMap(prev, incomingOdin) ? prev : incomingOdin);
     }
     if (state.firmware_files) {
@@ -1477,9 +1480,6 @@ export default function App() {
       try {
         await invoke("reset_busy_devices");
       } catch { }
-      setTimeout(() => {
-        refreshDevices(true);
-      }, 1000);
     }
   };
 

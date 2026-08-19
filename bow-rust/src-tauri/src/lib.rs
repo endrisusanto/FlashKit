@@ -1791,7 +1791,22 @@ fn save_shared_ui_state(
         merge_automation_state(&mut state.automation_state, patch);
     }
     if let Some(incoming_devices) = odin_devices {
-        state.odin_devices = incoming_devices;
+        if incoming_devices.is_object() {
+            if incoming_devices.as_object().map_or(false, |o| o.is_empty()) {
+                state.odin_devices = serde_json::json!({});
+            } else {
+                if !state.odin_devices.is_object() {
+                    state.odin_devices = serde_json::json!({});
+                }
+                if let (Some(existing_obj), Some(incoming_obj)) = (state.odin_devices.as_object_mut(), incoming_devices.as_object()) {
+                    for (k, v) in incoming_obj {
+                        existing_obj.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        } else {
+            state.odin_devices = incoming_devices;
+        }
     }
     if let Some(name) = custom_node_name {
         state.custom_node_name = if name.trim().is_empty() { None } else { Some(name) };
@@ -1948,7 +1963,6 @@ fn get_device_statuses() -> serde_json::Value {
 fn reset_busy_devices(app: AppHandle) {
     let mut state = read_busy_state();
     state.busy_devices.clear();
-    state.adb_devices.clear();
     state.device_statuses = serde_json::json!({});
     state.updated_at_ms = now_ms();
     write_busy_state(&state);
