@@ -142,7 +142,6 @@ export interface OdinFlashProps {
   odinDevices?: Record<string, DeviceData>;
   deviceDetails?: Record<string, any>;
   onDevicesUpdate?: (devices: Record<string, DeviceData>) => void;
-  sharedFirmwareFiles?: SharedFirmwareFiles;
   onVerifyProgress?: (progress: number) => void;
   onVerifyStateChange?: (verifying: boolean, progress: number) => void;
   onOdinFlashProgress?: (flashing: boolean, progress: number) => void;
@@ -150,7 +149,7 @@ export interface OdinFlashProps {
   isLeader: boolean;
 }
 
-const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, selectedSerials, setSelectedSerials, deviceDetails, onDevicesUpdate, sharedFirmwareFiles, onVerifyProgress, onVerifyStateChange, onOdinFlashProgress, onApFileChange, isLeader }, ref) => {
+const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, selectedSerials, setSelectedSerials, deviceDetails, onDevicesUpdate, onVerifyProgress, onVerifyStateChange, onOdinFlashProgress, onApFileChange }, ref) => {
   const desktopActive = isTauriRuntime();
   const invoke = <T,>(command: string, args?: Record<string, unknown>) =>
     desktopActive ? tauriInvoke<T>(command, args) : bridgeInvoke<T>(command, args);
@@ -176,10 +175,6 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
   const scanInFlightRef = useRef(false);
   const latestVerifyIdRef = useRef<Record<SlotKey, number>>({ bl: 0, ap: 0, cp: 0, csc: 0, userdata: 0 });
   const webProgressSeqRef = useRef(0);
-  const sharedUiSeenAt = useRef(0);
-  const sharedUiHydrated = useRef(true);
-  const localStateChangedAt = useRef(0); // ponytail: track when local state was last changed to guard against stale poll override
-  const lastLocalSaveMs = useRef(0); // ponytail: debounce self-echo in applySharedFirmwareFiles
   const filePathsRef = useRef(filePaths);
 
   useEffect(() => {
@@ -189,62 +184,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     deviceDetailsRef.current = deviceDetails;
   }, [isFlashing, selectedSerials, allSerials, deviceDetails]);
 
-  const applySharedFirmwareFiles = (state: SharedUiState) => {
-    if (!state.firmware_files || state.updated_at_ms <= sharedUiSeenAt.current) return;
-    const isSelfEcho = Date.now() - lastLocalSaveMs.current < 300;
-    sharedUiSeenAt.current = state.updated_at_ms;
-    
-    if (isSelfEcho) return;
-    setFilePaths(prev => {
-      const merged = { ...prev };
-      let changed = false;
-      for (const key of ["bl", "ap", "cp", "csc", "userdata"] as SlotKey[]) {
-        const incomingPath = state.firmware_files[key] || "";
-        if (incomingPath !== prev[key]) {
-          merged[key] = incomingPath;
-          changed = true;
-        }
-      }
-      if (changed) {
-        filePathsRef.current = merged;
-      }
-      return changed ? merged : prev;
-    });
-
-    if (state.firmware_files) {
-      setVerifyState(prev => {
-        let changed = false;
-        const next = { ...prev };
-        for (const key of ["bl", "ap", "cp", "csc", "userdata"] as SlotKey[]) {
-          const incomingPath = state.firmware_files[key] || "";
-          if (!incomingPath && prev[key].text && !prev[key].verifying) {
-            next[key] = { text: "", progress: 0, verifying: false };
-            changed = true;
-          }
-        }
-        return changed ? next : prev;
-      });
-    }
-
-  };
-
-
-
-  useEffect(() => {
-    if (sharedFirmwareFiles) {
-      applySharedFirmwareFiles({ firmware_files: sharedFirmwareFiles, selected_devices: [], updated_at_ms: Date.now() });
-    }
-  }, [sharedFirmwareFiles]);
-
-  useEffect(() => {
-    if (!desktopActive) return;
-    const unlisten = listen<SharedUiState>("shared-ui-updated", (event) => {
-      applySharedFirmwareFiles(event.payload);
-    });
-    return () => {
-      unlisten.then(fn => fn());
-    };
-  }, [desktopActive]);
+  // ponytail: Firmware file selection is kept local to each instance/window
 
 
 
@@ -282,28 +222,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
 
   // ponytail: OdinFlash relies on App.tsx parent for global UI state polling to avoid duplicate ping-pong disk reads.
 
-  useEffect(() => {
-    if (!sharedUiHydrated.current || isFlashing) return;
-    if (
-      filePaths.bl === filePathsRef.current.bl &&
-      filePaths.ap === filePathsRef.current.ap &&
-      filePaths.cp === filePathsRef.current.cp &&
-      filePaths.csc === filePathsRef.current.csc &&
-      filePaths.userdata === filePathsRef.current.userdata
-    ) return;
-    if (!isLeader) return; // ponytail: only leader can write state automatically
 
-    filePathsRef.current = filePaths;
-    localStateChangedAt.current = Date.now();
-    const timer = window.setTimeout(async () => {
-      try {
-        lastLocalSaveMs.current = Date.now();
-        const state = await invoke<SharedUiState>("save_shared_ui_state", { firmware_files: filePaths });
-        sharedUiSeenAt.current = state.updated_at_ms;
-      } catch { }
-    }, 150);
-    return () => window.clearTimeout(timer);
-  }, [filePaths, isFlashing]);
 
 
 
@@ -386,22 +305,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     }
   }, [isFlashing, overallFlashProgress, onOdinFlashProgress]);
 
-  const lastSavedOdinDevicesRef = useRef<Record<string, DeviceData>>({});
 
-  useEffect(() => {
-    if (!sharedUiHydrated.current) return;
-    if (sameDeviceMap(devices, lastSavedOdinDevicesRef.current)) return;
-    if (!desktopActive && !isLeader) return;
-
-    lastSavedOdinDevicesRef.current = devices;
-    const timer = window.setTimeout(async () => {
-      try {
-        const state = await invoke<SharedUiState>("save_shared_ui_state", { odin_devices: devices });
-        sharedUiSeenAt.current = state.updated_at_ms;
-      } catch { }
-    }, 150);
-    return () => window.clearTimeout(timer);
-  }, [devices, isLeader, desktopActive]);
 
   useEffect(() => {
     if (onVerifyProgress) {
@@ -960,10 +864,6 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
       setFilePaths(prev => {
         const nextFiles = { ...prev, [slot]: path };
         filePathsRef.current = nextFiles;
-        lastLocalSaveMs.current = Date.now(); // ponytail: stamp local save
-        invoke<SharedUiState>("save_shared_ui_state", { firmware_files: nextFiles })
-          .then(state => { sharedUiSeenAt.current = state.updated_at_ms; })
-          .catch(() => {});
         return nextFiles;
       });
       setVerifyState(prev => ({
@@ -996,10 +896,6 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     setFilePaths(empty);
     filePathsRef.current = empty;
     if (onApFileChange) onApFileChange("");
-    lastLocalSaveMs.current = Date.now(); // ponytail: debounce self-echo
-    invoke<SharedUiState>("save_shared_ui_state", { firmware_files: empty })
-      .then(state => { sharedUiSeenAt.current = state.updated_at_ms; })
-      .catch(() => {});
     setVerifyState({
       bl: { text: "", progress: 0, verifying: false },
       ap: { text: "", progress: 0, verifying: false },
@@ -1016,10 +912,6 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
     setFilePaths(prev => {
       const nextFiles = { ...prev, [slot]: "" };
       filePathsRef.current = nextFiles;
-      lastLocalSaveMs.current = Date.now(); // ponytail: debounce self-echo
-      invoke<SharedUiState>("save_shared_ui_state", { firmware_files: nextFiles })
-        .then(state => { sharedUiSeenAt.current = state.updated_at_ms; })
-        .catch(() => {});
       return nextFiles;
     });
     setVerifyState(prev => ({ ...prev, [slot]: { text: "", progress: 0, verifying: false } }));
@@ -1168,7 +1060,8 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
           </div>
         ) : (
           visibleDevices.map(([dev, data]) => {
-            const isModelMatch = isFirmwareForModel(apFilename, data.model || "");
+            const isDevBusy = busyDevices.some(b => b === dev || b === data.path || (data.serial && b === data.serial) || (data.port && b === data.port));
+            const isModelMatch = !isDevBusy && isFirmwareForModel(apFilename, data.model || "");
 
             let cardExtraStyle: React.CSSProperties = {};
             if (isModelMatch && data.status !== "Flashing...") {
@@ -1187,8 +1080,6 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                 };
               }
             }
-
-            const isDevBusy = busyDevices.some(b => b === dev || b === data.path || (data.serial && b === data.serial) || (data.port && b === data.port));
 
             return (
               <div
@@ -1209,7 +1100,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                     className="custom-check-wrapper"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (data.status !== "Flashing..." && !(isDevBusy && data.status === "Ready")) {
+                      if (data.status !== "Flashing..." && !isDevBusy) {
                         const newChecked = !data.checked;
                         
                         // Sync back to App.tsx
@@ -1230,7 +1121,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                       }
                     }}
                   >
-                    <input type="checkbox" checked={data.checked} readOnly disabled={data.status === "Flashing..." || (isDevBusy && data.status === "Ready")} />
+                    <input type="checkbox" checked={data.checked} readOnly disabled={data.status === "Flashing..." || isDevBusy} />
                     <div className={`custom-checkbox ${data.status === "Flashing..." ? 'flashing-checkbox' : ''}`}>
                       {data.status === "Flashing..." ? (
                         <RefreshCw className="w-3.5 h-3.5 text-white animate-spin" />
@@ -1240,7 +1131,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
                     </div>
                   </div>
                   <h3 className="dev-title">
-                    <span>{data.model || "Device"}{isDevBusy && <span style={{ marginLeft: 6, background: '#dc2626', color: 'white', fontSize: '10px', fontWeight: 900, letterSpacing: '0.15em', padding: '2px 8px', borderRadius: 4, textTransform: 'uppercase', boxShadow: '0 0 10px rgba(220,38,38,0.5)' }}>BUSY</span>}</span>
+                    <span>{data.model || "Device"}{isDevBusy && <span style={{ marginLeft: 6, background: '#dc2626', color: 'white', fontSize: '10px', fontWeight: 900, letterSpacing: '0.15em', padding: '2px 8px', borderRadius: 4, textTransform: 'uppercase', boxShadow: '0 0 10px rgba(220,38,38,0.5)' }}>ODIN</span>}</span>
                     <span className={
                       data.status === "Pass" ? "dev-status-success" :
                       data.status === "Fail" ? "dev-status-fail" :

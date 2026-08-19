@@ -3,7 +3,7 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { useLeaderElection } from "./hooks/useLeaderElection";
 import { listen } from "@tauri-apps/api/event";
 import { Terminal, RefreshCw, Play, Smartphone, Wifi, ChevronRight, Check, AlertTriangle, X, Download, ShieldAlert, DatabaseZap } from "lucide-react";
-import OdinFlash, { OdinFlashRef, DeviceData, SharedFirmwareFiles } from "./OdinFlash";
+import OdinFlash, { OdinFlashRef, DeviceData } from "./OdinFlash";
 import { WorkstationSelector, WorkstationNode } from "./components/WorkstationSelector";
 import logo from './assets/logo.png';
 import confetti from 'canvas-confetti';
@@ -66,19 +66,6 @@ function sameStringList(a: string[], b: string[]) {
 }
 
 
-
-function sameDeviceMap(a: Record<string, any>, b: Record<string, any>) {
-  if (!a || !b) return false;
-  const keysA = Object.keys(a);
-  const keysB = Object.keys(b);
-  if (keysA.length !== keysB.length) return false;
-  return keysA.every(k => {
-    const dA = a[k];
-    const dB = b[k];
-    return dB && dA.status === dB.status && dA.progress === dB.progress && dA.checked === dB.checked && dA.model === dB.model;
-  });
-}
-
 function sameStringMap(a?: Record<string, string>, b?: Record<string, string>) {
   if (!a && !b) return true;
   if (!a || !b) return false;
@@ -88,10 +75,9 @@ function sameStringMap(a?: Record<string, string>, b?: Record<string, string>) {
   return keysA.every(k => a[k] === b[k]);
 }
 
-function sameFilePaths(a: SharedFirmwareFiles, b: SharedFirmwareFiles) {
-  if (!a || !b) return false;
-  return a.bl === b.bl && a.ap === b.ap && a.cp === b.cp && a.csc === b.csc && a.userdata === b.userdata;
-}
+
+
+
 
 
 
@@ -183,30 +169,46 @@ function normalizeModelName(rawModel?: string): string {
   return cleaned || "Unknown Model";
 }
 
-// ponytail: helper to check if local automation state matches remote applied state
-function isAutomationStateEqual(a: any, b: any): boolean {
-  if (!a || !b) return false;
-  return (
-    a.seq_odin === b.seq_odin &&
-    a.seq_skip_wz === b.seq_skip_wz &&
-    a.seq_gba === b.seq_gba &&
-    a.seq_wifi === b.seq_wifi &&
-    a.loading === b.loading &&
-    a.current_step === b.current_step &&
-    a.is_stopping === b.is_stopping &&
-    sameStringList(a.logs || [], b.logs || [])
-  );
-}
-
 // ponytail: check if firmware filename contains a device's model code (region-agnostic)
 function isFirmwareForModel(firmwareFilename: string, deviceModel: string): boolean {
   if (!firmwareFilename || !deviceModel) return false;
-  const upper = firmwareFilename.toUpperCase();
-  // Extract raw model code: "SM-S721B" -> "S721B", "SM-F741B" -> "F741B"
-  const normalized = normalizeModelName(deviceModel);
-  const raw = normalized.replace(/^SM-/, "");
-  if (!raw || raw === "UNKNOWN MODEL") return false;
-  return upper.includes(raw);
+  const fw = firmwareFilename.toUpperCase();
+  const rawModel = deviceModel.toUpperCase().replace(/\s+/g, "");
+  
+  if (fw.includes(rawModel)) return true;
+  
+  const baseCode = rawModel.replace(/^(SM-|SAMSUNG-)/i, "");
+  if (baseCode.length >= 3 && fw.includes(baseCode)) return true;
+  
+  const shortCode = baseCode.slice(0, 4);
+  if (shortCode.length >= 3 && fw.includes(shortCode)) return true;
+
+  return false;
+}
+
+// ponytail: robust busy device matcher supporting USB: prefixes, serials, and devnodes
+function isDeviceBusy(
+  item: { id?: string; serial?: string; port?: string; odinKey?: string },
+  busyList: string[]
+): boolean {
+  if (!busyList || busyList.length === 0) return false;
+  const normalize = (s?: string) => s ? s.trim().replace(/^USB:/i, '').toLowerCase() : '';
+  
+  const id = normalize(item.id);
+  const serial = normalize(item.serial);
+  const port = normalize(item.port);
+  const odinKey = normalize(item.odinKey);
+
+  return busyList.some(b => {
+    const nb = normalize(b);
+    if (!nb) return false;
+    return (
+      (id && (nb === id || nb.endsWith('/' + id))) ||
+      (serial && nb === serial) ||
+      (port && (nb === port || nb.endsWith('/' + port))) ||
+      (odinKey && (nb === odinKey || nb.endsWith('/' + odinKey)))
+    );
+  });
 }
 
 function adbShellQuote(value: string) {
@@ -260,7 +262,6 @@ export default function App() {
   const [odinFlashProgress, setOdinFlashProgress] = useState(0);
   const [deviceStepStatuses, setDeviceStepStatuses] = useState<Record<string, string>>({});
 
-  const [sharedFirmwareFiles, setSharedFirmwareFiles] = useState<SharedFirmwareFiles | null>(null);
   const [apFileName, setApFileName] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [isRefreshingDevices, setIsRefreshingDevices] = useState(false);
@@ -295,8 +296,6 @@ export default function App() {
   const refreshInFlightRef = useRef(false);
   const sharedUiSeenAt = useRef(0);
   const sharedUiHydrated = useRef(false);
-  const lastAppliedAutomationState = useRef<any>(null);
-  const lastSavedSelectedDevices = useRef<string[]>([]);
   const lastLocalSaveMs = useRef(0); // ponytail: debounce self-echo events
   const backendActive = desktopActive || desktopBridgeOnline;
 
@@ -407,35 +406,7 @@ export default function App() {
     if (state.updated_at_ms <= sharedUiSeenAt.current) return;
     sharedUiSeenAt.current = state.updated_at_ms;
 
-    // ponytail: skip automation_state & selected_devices echo from our own save (2000ms debounce)
-    const isSelfEcho = Date.now() - lastLocalSaveMs.current < 2000;
-
-    if (!isSelfEcho) {
-      // ponytail: sync selected_devices across all windows & clients
-      if (state.selected_devices) {
-        setSelectedDevices(prev => {
-          if (sameStringList(prev, state.selected_devices)) return prev;
-          lastSavedSelectedDevices.current = state.selected_devices;
-          return state.selected_devices;
-        });
-      }
-
-      // ponytail: sync automation_state (flow checkboxes, loading, logs) across all windows & clients
-      const incoming = state.automation_state;
-      if (incoming) {
-        if (!isAutomationStateEqual(incoming, lastAppliedAutomationState.current)) {
-          lastAppliedAutomationState.current = incoming;
-          setSeqOdin(incoming.seq_odin);
-          setSeqSkipWz(incoming.seq_skip_wz);
-          setSeqGba(incoming.seq_gba);
-          setSeqWifi(incoming.seq_wifi);
-          setLoading(incoming.loading);
-          setCurrentStep(incoming.current_step);
-          setIsStopping(incoming.is_stopping);
-          if (incoming.logs) setLogs(prev => sameStringList(prev, incoming.logs) ? prev : incoming.logs);
-        }
-      }
-    }
+    // ponytail: Keep selected_devices and automation_state (loading, logs, buttons) local to each instance
 
     // ponytail: sync device_statuses globally across all windows & web clients unconditionally
     if (state.automation_state?.device_statuses) {
@@ -446,17 +417,6 @@ export default function App() {
     // Sync busy_devices globally across all windows & web clients
     if (state.busy_devices) {
       setBusyDevices(prev => sameStringList(prev, state.busy_devices!) ? prev : state.busy_devices!);
-    }
-
-    // Sync odin_devices globally to render FLASHING badges on device cards across all windows
-    if (state.odin_devices) {
-      const incomingOdin = state.odin_devices as Record<string, DeviceData>;
-      setOdinDeviceStates(prev => sameDeviceMap(prev, incomingOdin) ? prev : incomingOdin);
-    }
-    if (state.firmware_files) {
-      setSharedFirmwareFiles(prev => sameFilePaths(prev || { bl: "", ap: "", cp: "", csc: "", userdata: "" }, state.firmware_files) ? prev : state.firmware_files);
-      const name = state.firmware_files.ap ? (state.firmware_files.ap.split(/[/\\]/).pop() || "") : "";
-      setApFileName(name);
     }
     if ((state as any).custom_node_name !== undefined) {
       const name = (state as any).custom_node_name || "";
@@ -582,55 +542,7 @@ export default function App() {
     return () => window.clearInterval(interval);
   }, [backendActive, desktopActive]);
 
-  // ponytail: debounced writer for local user changes; guards against echoing remote applies back
-  useEffect(() => {
-    if (!backendActive || !sharedUiHydrated.current) return;
-    // ponytail: web clients must not overwrite active backend automation state
-    if (!desktopActive && lastAppliedAutomationState.current?.loading && !loading) return;
-
-    const currentAuto = {
-      seq_odin: seqOdin,
-      seq_skip_wz: seqSkipWz,
-      seq_gba: seqGba,
-      seq_wifi: seqWifi,
-      loading,
-      current_step: currentStep,
-      is_stopping: isStopping,
-      logs,
-    };
-
-    if (isAutomationStateEqual(currentAuto, lastAppliedAutomationState.current)) return;
-    if (!isLeader) return; // ponytail: only leader can write state automatically
-
-    lastAppliedAutomationState.current = currentAuto;
-    lastLocalSaveMs.current = Date.now(); // ponytail: debounce self-echo
-    invoke<SharedUiState>("save_shared_ui_state", {
-      automation_state: currentAuto,
-    }).then(state => {
-      sharedUiSeenAt.current = state.updated_at_ms;
-      if (state.automation_state) {
-        lastAppliedAutomationState.current = state.automation_state;
-      }
-    }).catch(() => {});
-  }, [backendActive, seqOdin, seqSkipWz, seqGba, seqWifi, loading, currentStep, isStopping, logs]);
-
-  // ponytail: writer for local device selection changes to backend
-  useEffect(() => {
-    if (!backendActive || !sharedUiHydrated.current) return;
-    if (sameStringList(selectedDevices, lastSavedSelectedDevices.current)) return;
-
-    lastSavedSelectedDevices.current = selectedDevices;
-    lastLocalSaveMs.current = Date.now(); // ponytail: debounce self-echo
-
-    invoke<SharedUiState>("save_shared_ui_state", {
-      selected_devices: selectedDevices,
-    }).then(state => {
-      sharedUiSeenAt.current = state.updated_at_ms;
-      if (state.selected_devices) {
-        lastSavedSelectedDevices.current = state.selected_devices;
-      }
-    }).catch(() => {});
-  }, [backendActive, selectedDevices]);
+  // ponytail: automation execution and device selection are kept local to each instance
 
   useEffect(() => {
     if (logContainerRef.current) {
@@ -697,6 +609,8 @@ export default function App() {
     setDevices(prev => sameStringList(prev, cachedDevices) ? prev : cachedDevices);
     setDeviceDetails(prev => ({ ...prev, ...cachedDetails }));
   };
+
+
 
   useEffect(() => {
     if (!backendActive) return;
@@ -1021,15 +935,36 @@ export default function App() {
     const aliases = new Set<string>();
     targetIds.forEach(id => {
       aliases.add(id);
+      const cleanId = id.replace(/^USB:/i, '');
+      aliases.add(cleanId);
+      aliases.add("USB:" + cleanId);
+
       const m = mergedDevices.find(d => d.id === id || d.odinKey === id || d.serial === id || d.port === id);
       if (m) {
-        if (m.id) aliases.add(m.id);
+        if (m.id) { aliases.add(m.id); aliases.add(m.id.replace(/^USB:/i, '')); }
         if (m.serial) aliases.add(m.serial);
-        if (m.port) aliases.add(m.port);
+        if (m.port) { aliases.add(m.port); aliases.add(m.port.replace(/^USB:/i, '')); aliases.add("USB:" + m.port.replace(/^USB:/i, '')); }
         if (m.odinKey) aliases.add(m.odinKey);
       }
+
+      // Also match against odinDeviceStates
+      Object.entries(odinDeviceStates).forEach(([path, data]) => {
+        if (
+          path === id ||
+          data.serial === id ||
+          (data.port && (data.port === id || data.port === m?.port || data.port.replace(/^USB:/i, '') === cleanId))
+        ) {
+          aliases.add(path);
+          if (data.serial) aliases.add(data.serial);
+          if (data.port) {
+            aliases.add(data.port);
+            aliases.add(data.port.replace(/^USB:/i, ''));
+            aliases.add("USB:" + data.port.replace(/^USB:/i, ''));
+          }
+        }
+      });
     });
-    return [...aliases];
+    return [...aliases].filter(Boolean);
   };
 
   const broadcastDeviceStepStatus = async (status: string | null, targetSerials?: string[]) => {
@@ -1329,8 +1264,9 @@ export default function App() {
     }
 
     setLoading(true);
-    // Mark as busy for the whole sequence
-    try { await invoke("mark_busy", { serials: activeSelection }); } catch { }
+    // Mark as busy with all aliases (serial, port, odinKey) for the whole sequence
+    const allBusyAliases = getAllDeviceAliases(activeSelection);
+    try { await invoke("mark_busy", { serials: allBusyAliases }); } catch { }
 
     try {
       await new Promise(r => setTimeout(r, 50));
@@ -1475,7 +1411,8 @@ export default function App() {
         odinRef.current?.resetAllStatuses();
       } catch { }
       try {
-        await invoke("reset_busy_devices");
+        const allBusyAliases = getAllDeviceAliases(activeSelection);
+        await invoke("clear_busy", { serials: allBusyAliases });
       } catch { }
       setTimeout(() => {
         refreshDevices(true);
@@ -1484,7 +1421,7 @@ export default function App() {
   };
 
   const toggleDevice = (id: string, serial?: string, odinKey?: string, port?: string) => {
-    if (busyDevices.includes(id)) return;
+    if (isDeviceBusy({ id, serial, odinKey, port }, busyDevices)) return;
     lastLocalSaveMs.current = Date.now();
     const primaryId = odinKey || id;
     const keys = [id, serial, odinKey, port].filter((k): k is string => Boolean(k));
@@ -1607,7 +1544,7 @@ export default function App() {
   }, [devices, deviceDetails, odinDeviceStates]);
 
   const availableDeviceIds = useMemo(
-    () => mergedDevices.filter(d => !busyDevices.includes(d.id)).map(d => d.id),
+    () => mergedDevices.filter(d => !isDeviceBusy(d, busyDevices)).map(d => d.id),
     [mergedDevices, busyDevices]
   );
 
@@ -1967,7 +1904,6 @@ export default function App() {
                 odinDevices={odinDeviceStates}
                 deviceDetails={deviceDetails}
                 onDevicesUpdate={setOdinDeviceStates}
-                sharedFirmwareFiles={sharedFirmwareFiles || undefined}
                 onOdinFlashProgress={(flashing, progress) => {
                   setIsOdinFlashingState(flashing);
                   setOdinFlashProgress(progress);
@@ -2014,17 +1950,14 @@ export default function App() {
                   </div>
                 ) : (
                   groupedDevices.map(group => {
-                    const groupAvailableIds = group.devices.filter(d => !busyDevices.includes(d.id)).map(d => d.id);
+                    const groupAvailableIds = group.devices.filter(d => !isDeviceBusy(d, busyDevices)).map(d => d.id);
                     const allGroupSelected = groupAvailableIds.length > 0 && groupAvailableIds.every(id => selectedDevices.includes(id));
                     const selectedCount = group.devices.filter(d => selectedDevices.includes(d.id)).length;
-                    const busyCount = group.devices.filter(d => busyDevices.includes(d.id)).length;
+                    const busyCount = group.devices.filter(d => isDeviceBusy(d, busyDevices)).length;
                     const flashingCount = group.devices.filter(d => {
+                      const isSel = selectedDevices.includes(d.id) || Boolean(d.serial && selectedDevices.includes(d.serial));
                       const status = d.odinKey ? odinDeviceStates[d.odinKey]?.status : undefined;
-                      return status === "Flashing...";
-                    }).length;
-                    const passCount = group.devices.filter(d => {
-                      const status = d.odinKey ? odinDeviceStates[d.odinKey]?.status : undefined;
-                      return status === "Pass";
+                      return isSel && status === "Flashing...";
                     }).length;
                     const failCount = group.devices.filter(d => {
                       const status = d.odinKey ? odinDeviceStates[d.odinKey]?.status : undefined;
@@ -2048,9 +1981,8 @@ export default function App() {
                           <span className="text-[11px] font-black uppercase tracking-widest text-white/45 truncate">{group.model}</span>
                           <span className="flex items-center gap-1.5 text-[10px] font-black text-white/30">
                             <span>{selectedCount}/{group.devices.length}</span>
-                            {busyCount > 0 && <span className="px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">BUSY {busyCount}</span>}
+                            {busyCount > 0 && <span className="px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">ODIN {busyCount}</span>}
                             {flashingCount > 0 && <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400">FLASH {flashingCount}</span>}
-                            {passCount > 0 && <span className="px-1.5 py-0.5 rounded bg-green-500/15 text-green-400">PASS {passCount}</span>}
                             {failCount > 0 && <span className="px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">FAIL {failCount}</span>}
                           </span>
                         </button>
@@ -2066,29 +1998,22 @@ export default function App() {
                                              (item.id && deviceStepStatuses[item.id]) ||
                                              (item.odinKey && deviceStepStatuses[item.odinKey]);
 
-                          const isOdinMode = item.type === "odin" || (odinData !== undefined && odinData.status !== "Ready");
-                          const isFlashing = odinData?.status === "Flashing..." || Boolean(stepStatus && (stepStatus.includes("Flashing") || stepStatus.includes("Odin")));
-                          const isPass = odinData?.status === "Pass";
-                          const isFail = odinData?.status === "Fail";
-
-                          const isBusy = busyDevices.includes(id) ||
-                                         Boolean(item.serial && busyDevices.includes(item.serial)) ||
-                                         Boolean(item.port && busyDevices.includes(item.port)) ||
-                                         Boolean(item.odinKey && busyDevices.includes(item.odinKey));
-
                           const isSelected = selectedDevices.includes(id) ||
                             Boolean(item.serial && selectedDevices.includes(item.serial)) ||
                             Boolean(item.odinKey && selectedDevices.includes(item.odinKey));
 
-                          const isModelMatch = isFirmwareForModel(apFileName, item.model || "");
+                          const isFlashing = isSelected && (odinData?.status === "Flashing..." || Boolean(stepStatus && (stepStatus.includes("Flashing") || stepStatus.includes("Odin"))));
+                          const isFail = odinData?.status === "Fail";
+
+                          const isBusy = isDeviceBusy(item, busyDevices);
+
+                          const isModelMatch = !isBusy && isFirmwareForModel(apFileName, item.model || "");
 
                           let borderStyle = "";
                           if (isFlashing) {
                             borderStyle = "border-blue-500 bg-blue-500/10 shadow-[0_0_15px_rgba(59,130,246,0.3)]";
                           } else if (isBusy && !isSelected) {
                             borderStyle = "opacity-75 cursor-not-allowed border-red-500/20 bg-red-500/5 shadow-[0_0_10px_rgba(239,68,68,0.1)]";
-                          } else if (isPass) {
-                            borderStyle = "border-green-500 bg-green-500/10 shadow-[0_0_15px_rgba(34,197,94,0.3)]";
                           } else if (isFail) {
                             borderStyle = "border-red-500 bg-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.3)]";
                           } else if (isModelMatch) {
@@ -2115,7 +2040,6 @@ export default function App() {
                                   style={{ width: `${odinData.progress}%` }}
                                 />
                               )}
-                              {isPass && <div className="absolute inset-0 bg-green-500/10 z-0" />}
                               {isFail && <div className="absolute inset-0 bg-red-500/10 z-0" />}
 
                               <div className="relative z-10 h-full flex flex-col justify-center">
@@ -2133,14 +2057,17 @@ export default function App() {
                                             </span>
                                           );
                                         }
-                                        if (isOdinMode) {
+                                        if (isFlashing) {
                                           return (
-                                            <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded ${isFlashing ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30 animate-pulse' :
-                                                isPass ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
-                                                  isFail ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                                                    'bg-blue-500/10 text-blue-400/80 border border-blue-500/20'
-                                              }`}>
-                                              {isFlashing ? `Flashing ${odinData?.progress || 0}%` : isPass ? "Odin Completed" : odinData?.status || "Odin Mode"}
+                                            <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 animate-pulse">
+                                              {`Flashing ${odinData?.progress || 0}%`}
+                                            </span>
+                                          );
+                                        }
+                                        if (isFail) {
+                                          return (
+                                            <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">
+                                              {odinData?.status || "Fail"}
                                             </span>
                                           );
                                         }
@@ -2152,7 +2079,7 @@ export default function App() {
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-3">
-                                    {isBusy && <span className="bg-red-600 px-2 py-0.5 rounded text-[10px] font-black tracking-[0.15em] text-white shadow-[0_0_10px_rgba(220,38,38,0.5)]">BUSY</span>}
+                                    {isBusy && !isFlashing && <span className="bg-red-600 px-2 py-0.5 rounded text-[10px] font-black tracking-[0.15em] text-white shadow-[0_0_10px_rgba(220,38,38,0.5)]">ODIN</span>}
                                     <div className={`w-6 h-6 border flex items-center justify-center transition-all ${
                                       isFlashing || (loading && isSelected)
                                         ? 'bg-blue-500/20 border-blue-500'

@@ -1689,41 +1689,20 @@ fn now_ms() -> u128 {
 }
 
 fn read_shared_ui_state() -> SharedUiState {
-    if let Ok(guard) = SHARED_UI_MEMORY_STATE.lock() {
-        if let Some(cached) = &*guard {
-            return cached.clone();
-        }
-    }
     let mut state = std::fs::read_to_string(SHARED_UI_FILE)
         .ok()
         .and_then(|data| serde_json::from_str::<SharedUiState>(&data).ok())
         .unwrap_or_default();
 
-    // ponytail: Load device_statuses from busy.json so all instances/web get step status badges
+    // ponytail: Load fresh device_statuses & busy_devices from busy.json so all instances/web get active locks
     let busy = read_busy_state();
     if !busy.device_statuses.is_null() && busy.device_statuses.is_object() {
         state.automation_state.device_statuses = busy.device_statuses.clone();
     }
-
-    state.automation_state.logs.clear();
-    state.automation_state.is_stopping = false;
-    state.automation_state.loading = false;
-    state.automation_state.current_step = None;
-
-    if let Some(map) = state.odin_devices.as_object_mut() {
-        for (_key, val) in map.iter_mut() {
-            if let Some(obj) = val.as_object_mut() {
-                if obj.get("status").and_then(|s| s.as_str()) == Some("Flashing...") {
-                    obj.insert("status".to_string(), serde_json::json!("Ready"));
-                    obj.insert("progress".to_string(), serde_json::json!(0));
-                }
-            }
-        }
+    if !busy.busy_devices.is_empty() {
+        state.busy_devices = busy.busy_devices.into_iter().collect();
     }
 
-    if let Ok(mut guard) = SHARED_UI_MEMORY_STATE.lock() {
-        *guard = Some(state.clone());
-    }
     state
 }
 
@@ -1737,15 +1716,15 @@ fn write_shared_ui_state(state: &SharedUiState) {
 }
 
 fn clean_startup_cache() {
-    let mut busy = read_busy_state();
-    busy.busy_devices.clear();
-    write_busy_state(&busy);
-
-    // ponytail: Preserve custom_node_name across startup cache reset
-    let existing = read_shared_ui_state();
-    let mut default_state = SharedUiState::default();
-    default_state.custom_node_name = existing.custom_node_name;
-    write_shared_ui_state(&default_state);
+    // ponytail: Multi-instance safety - do not wipe active busy devices or shared state from other running instances on startup
+    if !std::path::Path::new(BUSY_FILE).exists() {
+        let busy = BusyState::default();
+        write_busy_state(&busy);
+    }
+    if !std::path::Path::new(SHARED_UI_FILE).exists() {
+        let default_state = SharedUiState::default();
+        write_shared_ui_state(&default_state);
+    }
 }
 
 #[tauri::command]
