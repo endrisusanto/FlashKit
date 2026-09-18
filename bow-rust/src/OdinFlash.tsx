@@ -376,7 +376,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
         if (isCurrentAdb && (updated[key].status === "Pass" || updated[key].status === "Fail")) {
           // Device booted back up into ADB mode: reset status to Ready!
           updated[key] = { ...updated[key], status: "Ready", progress: 0 };
-        } else if (!isCurrentOdin && !isCurrentAdb && !isFlashingRef.current && updated[key].status !== "Ready") {
+        } else if (!isCurrentOdin && !isCurrentAdb && !isFlashingRef.current && updated[key].status !== "Flashing...") {
           delete updated[key];
         }
       }
@@ -448,7 +448,7 @@ const OdinFlash = forwardRef<OdinFlashRef, OdinFlashProps>(({ allSerials, select
         } else {
           if (!updated[dev].serial && preservedSerial) updated[dev].serial = preservedSerial;
           if (!updated[dev].model && preservedModel) updated[dev].model = preservedModel;
-          if (updated[dev].status === "Fail") {
+          if (updated[dev].status === "Fail" || updated[dev].status === "Pass") {
             updated[dev] = {
               ...updated[dev],
               status: "Ready",
